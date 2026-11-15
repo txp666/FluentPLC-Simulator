@@ -20,7 +20,7 @@ struct Tag {
 };
 
 struct Project {
-    QString name = QStringLiteral("S7 测试台");
+    QString name = QStringLiteral("S7 Test Bench");
     QString bindAddress = QStringLiteral("127.0.0.1");
     quint16 port = 1102;
     int memorySize = 512; // bytes per registered area / DB

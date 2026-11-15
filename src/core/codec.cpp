@@ -1,4 +1,5 @@
 #include "core/codec.h"
+#include "core/i18n.h"
 
 #include <QtCore/QMetaType>
 #include <QtCore/QRegularExpression>
@@ -66,7 +67,7 @@ bool parseDataType(const QString &text, DataType *type, QString *error)
         out = {DataType::Kind::Int32, 4, QStringLiteral("DINT")};
     else if (name == QLatin1String("REAL") || name == QLatin1String("FLOAT32"))
         out = {DataType::Kind::Real32, 4, QStringLiteral("REAL")};
-    else return fail(error, QStringLiteral("不支持的数据类型：%1").arg(text));
+    else return fail(error, I18n::tr("Unsupported data type: %1").arg(text));
     if (type) *type = out;
     if (error) error->clear();
     return true;
@@ -74,7 +75,7 @@ bool parseDataType(const QString &text, DataType *type, QString *error)
 
 bool encodeValue(const QVariant &value, const DataType &type, QByteArray *bytes, QString *error)
 {
-    const auto invalid = [&]() { return fail(error, QStringLiteral("值“%1”无效或超出 %2 范围").arg(value.toString(), type.name)); };
+    const auto invalid = [&]() { return fail(error, I18n::tr("Value \"%1\" is invalid or outside the %2 range").arg(value.toString(), type.name)); };
     QByteArray out(type.byteCount, '\0');
     if (type.isBool()) {
         bool bit = false;

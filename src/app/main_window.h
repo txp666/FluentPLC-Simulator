@@ -5,6 +5,7 @@
 #include <QtCore/QElapsedTimer>
 
 class QCloseEvent;
+class QEvent;
 class QLabel;
 class QTimer;
 
@@ -36,6 +37,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private:
     QWidget *createMonitorPage();
@@ -43,6 +45,7 @@ private:
     QWidget *createLogsPage();
     QWidget *createSettingsPage();
     void createShortcuts();
+    void retranslateUi();
     bool applyProject(const Project &project, const QString &path, bool dirty);
     bool confirmSaveChanges();
     bool saveCurrentProject();
@@ -94,6 +97,7 @@ private:
     FluentQt::LineEdit *m_projectNameEdit = nullptr;
     FluentQt::SpinBox *m_memorySpin = nullptr;
     FluentQt::ComboBox *m_themeCombo = nullptr;
+    FluentQt::ComboBox *m_languageCombo = nullptr;
     FluentQt::PlainTextEdit *m_logEdit = nullptr;
 };
 

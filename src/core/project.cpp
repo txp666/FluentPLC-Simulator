@@ -1,4 +1,5 @@
 #include "core/project.h"
+#include "core/i18n.h"
 #include "core/project_plan.h"
 
 #include <QtCore/QFile>
@@ -68,15 +69,15 @@ Project normalized(const Project &project, const ProjectPlan &plan)
 bool prepareProject(const Project &project, ProjectPlan *plan, QString *error)
 {
     if (project.name.trimmed().isEmpty() || project.name.size() > 256)
-        return fail(error, QStringLiteral("工程名称不能为空，且不能超过 256 个字符"));
+        return fail(error, I18n::tr("Project name must contain 1 to 256 characters"));
     if (!validBindAddress(project.bindAddress))
-        return fail(error, QStringLiteral("监听地址必须是 IPv4 地址（例如 127.0.0.1 或 0.0.0.0）"));
-    if (project.port == 0) return fail(error, QStringLiteral("端口必须为 1–65535"));
+        return fail(error, I18n::tr("Bind address must be an IPv4 address, such as 127.0.0.1 or 0.0.0.0"));
+    if (project.port == 0) return fail(error, I18n::tr("Port must be between 1 and 65535"));
     // The native server stores each registered size in a 16-bit word.
     if (project.memorySize < 1 || project.memorySize > 65535)
-        return fail(error, QStringLiteral("每区内存必须为 1–65535 字节"));
+        return fail(error, I18n::tr("Area memory size must be between 1 and 65535 bytes"));
     if (project.tags.size() > kMaximumTags)
-        return fail(error, QStringLiteral("标签数量不能超过 %1").arg(kMaximumTags));
+        return fail(error, I18n::tr("A project can contain at most %1 tags").arg(kMaximumTags));
 
     ProjectPlan result;
     result.tags.reserve(project.tags.size());
@@ -86,36 +87,36 @@ bool prepareProject(const Project &project, ProjectPlan *plan, QString *error)
     QHash<QString, QList<int>> areaTags;
     for (int i = 0; i < project.tags.size(); ++i) {
         const Tag &tag = project.tags.at(i);
-        const QString label = QStringLiteral("标签 %1（%2）").arg(i + 1).arg(tag.name);
+        const QString label = I18n::tr("Tag %1 (%2)").arg(i + 1).arg(tag.name);
         const QString name = tag.name.trimmed().toCaseFolded();
         if (name.isEmpty() || tag.name.size() > 128 || names.contains(name))
-            return fail(error, label + QStringLiteral("：名称不能为空、重复或超过 128 个字符"));
+            return fail(error, label + I18n::tr(": Name must be unique and contain 1 to 128 characters"));
         names.insert(name);
         PreparedTag parsed;
         QString why;
         if (!parseAddress(tag.address, &parsed.address, &why) || !parseDataType(tag.dataType, &parsed.type, &why))
-            return fail(error, label + QStringLiteral("：") + why);
+            return fail(error, I18n::tr("%1: %2").arg(label, why));
         if ((parsed.type.isBool() != (parsed.address.bit >= 0)) || parsed.type.byteCount != parsed.address.byteCount)
-            return fail(error, label + QStringLiteral("：地址宽度与数据类型 %1 不匹配").arg(parsed.type.name));
+            return fail(error, label + I18n::tr(": Address width does not match data type %1").arg(parsed.type.name));
         if (parsed.address.byteOffset + parsed.type.byteCount > project.memorySize)
-            return fail(error, label + QStringLiteral("：地址越界，每区仅有 %1 字节").arg(project.memorySize));
+            return fail(error, label + I18n::tr(": Address is out of bounds; each area contains %1 bytes").arg(project.memorySize));
         if (!encodeValue(tag.initialValue, parsed.type, &parsed.initialBytes, &why))
-            return fail(error, label + QStringLiteral("：初始") + why);
+            return fail(error, I18n::tr("%1: Invalid initial value. %2").arg(label, why));
         if (!std::isfinite(tag.minimum) || !std::isfinite(tag.maximum) || tag.minimum > tag.maximum
             || !std::isfinite(tag.periodSeconds) || tag.periodSeconds <= 0)
-            return fail(error, label + QStringLiteral("：上下限必须有限且下限不大于上限，周期必须为有限正数"));
+            return fail(error, label + I18n::tr(": Limits must be finite and ordered, and period must be a finite positive number"));
         const QString mode = modeOf(tag);
         if (mode != QLatin1String("manual") && mode != QLatin1String("sine") && mode != QLatin1String("ramp")
             && mode != QLatin1String("toggle") && mode != QLatin1String("follow"))
-            return fail(error, label + QStringLiteral("：未知生成模式 %1").arg(tag.mode));
+            return fail(error, label + I18n::tr(": Unknown generator mode: %1").arg(tag.mode));
         if (mode == QLatin1String("toggle") && !parsed.type.isBool())
-            return fail(error, label + QStringLiteral("：toggle 仅适用于 BOOL"));
+            return fail(error, label + I18n::tr(": Toggle mode requires BOOL"));
         if (mode == QLatin1String("sine") || mode == QLatin1String("ramp")) {
-            if (parsed.type.isBool()) return fail(error, label + QStringLiteral("：sine/ramp 需要数值类型"));
+            if (parsed.type.isBool()) return fail(error, label + I18n::tr(": Sine and ramp modes require a numeric type"));
             QByteArray ignored;
             if (!encodeValue(tag.minimum, parsed.type, &ignored, &why)
                 || !encodeValue(tag.maximum, parsed.type, &ignored, &why))
-                return fail(error, label + QStringLiteral("：生成器上下限超出数据类型范围，整数类型须使用整数上下限"));
+                return fail(error, label + I18n::tr(": Generator limits are outside the data type range; integer types require integer limits"));
         }
         if (parsed.address.area == MemoryArea::DataBlock) dbNumbers.insert(parsed.address.dbNumber);
         areaTags[parsed.address.areaKey()].append(i);
@@ -123,9 +124,9 @@ bool prepareProject(const Project &project, ProjectPlan *plan, QString *error)
         result.tags.append(parsed);
     }
     if (dbNumbers.size() > 2048)
-        return fail(error, QStringLiteral("Snap7 最多支持 2048 个 DB"));
+        return fail(error, I18n::tr("Snap7 supports at most 2048 data blocks"));
     if (qint64(dbNumbers.size() + 3) * project.memorySize > kMaximumMemory)
-        return fail(error, QStringLiteral("工程注册内存总量不能超过 32 MiB，请减少 DB 数或每区字节数"));
+        return fail(error, I18n::tr("Registered memory cannot exceed 32 MiB; reduce the data block count or area size"));
 
     for (auto it = areaTags.begin(); it != areaTags.end(); ++it) {
         QList<int> indexes = it.value();
@@ -138,7 +139,7 @@ bool prepareProject(const Project &project, ProjectPlan *plan, QString *error)
             if (previous >= 0) {
                 const Address &before = result.tags.at(previous).address;
                 if (address.firstBit() < before.firstBit() + before.bitCount())
-                    return fail(error, QStringLiteral("标签 %1 与 %2 的地址重叠").arg(project.tags.at(previous).name, project.tags.at(index).name));
+                    return fail(error, I18n::tr("Tag addresses overlap: %1 and %2").arg(project.tags.at(previous).name, project.tags.at(index).name));
             }
             previous = index;
         }
@@ -150,12 +151,12 @@ bool prepareProject(const Project &project, ProjectPlan *plan, QString *error)
         Address source;
         QString why;
         if (!parseAddress(tag.source, &source, &why))
-            return fail(error, QStringLiteral("标签 %1 的 follow 源无效：%2").arg(tag.name, why));
+            return fail(error, I18n::tr("Tag %1 has an invalid follow source: %2").arg(tag.name, why));
         const auto found = addresses.constFind(source.canonical);
         if (found == addresses.constEnd())
-            return fail(error, QStringLiteral("标签 %1 的 follow 源未定义：%2").arg(tag.name, source.canonical));
+            return fail(error, I18n::tr("Tag %1 refers to an undefined follow source: %2").arg(tag.name, source.canonical));
         if (result.tags.at(*found).type.kind != result.tags.at(i).type.kind)
-            return fail(error, QStringLiteral("标签 %1 与 follow 源的数据类型必须相同").arg(tag.name));
+            return fail(error, I18n::tr("Tag %1 must have the same data type as its follow source").arg(tag.name));
         result.tags[i].sourceIndex = *found;
     }
     // Kahn's algorithm keeps a maliciously long dependency chain off the stack.
@@ -173,7 +174,7 @@ bool prepareProject(const Project &project, ProjectPlan *plan, QString *error)
         for (int dependent : dependents.at(index)) if (--indegree[dependent] == 0) ready.append(dependent);
     }
     if (result.evaluationOrder.size() != result.tags.size())
-        return fail(error, QStringLiteral("follow 规则存在循环依赖"));
+        return fail(error, I18n::tr("Follow rules contain a dependency cycle"));
     if (plan) *plan = result;
     if (error) error->clear();
     return true;
@@ -190,17 +191,17 @@ Project Project::demo()
         return Tag{name, address, type, initial, mode, lo, hi, period, source};
     };
     project.tags = {
-        tag(QStringLiteral("运行状态"), QStringLiteral("DB1.DBX0.0"), QStringLiteral("BOOL"), false,
+        tag(QStringLiteral("Running"), QStringLiteral("DB1.DBX0.0"), QStringLiteral("BOOL"), false,
             QStringLiteral("follow"), 0, 1, 10, QStringLiteral("DB1.DBX0.1")),
-        tag(QStringLiteral("启动请求"), QStringLiteral("DB1.DBX0.1"), QStringLiteral("BOOL"), false),
-        tag(QStringLiteral("温度"), QStringLiteral("DB1.DBD4"), QStringLiteral("REAL"), 50.0,
+        tag(QStringLiteral("Start request"), QStringLiteral("DB1.DBX0.1"), QStringLiteral("BOOL"), false),
+        tag(QStringLiteral("Temperature"), QStringLiteral("DB1.DBD4"), QStringLiteral("REAL"), 50.0,
             QStringLiteral("sine"), 20, 80, 10),
-        tag(QStringLiteral("压力"), QStringLiteral("DB1.DBD8"), QStringLiteral("REAL"), 0.0,
+        tag(QStringLiteral("Pressure"), QStringLiteral("DB1.DBD8"), QStringLiteral("REAL"), 0.0,
             QStringLiteral("ramp"), 0, 10, 10),
-        tag(QStringLiteral("速度"), QStringLiteral("DB1.DBW12"), QStringLiteral("INT"), 1200),
-        tag(QStringLiteral("心跳"), QStringLiteral("M0.0"), QStringLiteral("BOOL"), false,
+        tag(QStringLiteral("Speed"), QStringLiteral("DB1.DBW12"), QStringLiteral("INT"), 1200),
+        tag(QStringLiteral("Heartbeat"), QStringLiteral("M0.0"), QStringLiteral("BOOL"), false,
             QStringLiteral("toggle"), 0, 1, 2),
-        tag(QStringLiteral("输出状态"), QStringLiteral("Q0.0"), QStringLiteral("BOOL"), false,
+        tag(QStringLiteral("Output"), QStringLiteral("Q0.0"), QStringLiteral("BOOL"), false,
             QStringLiteral("follow"), 0, 1, 10, QStringLiteral("DB1.DBX0.1")),
     };
     return project;
@@ -227,51 +228,51 @@ bool Project::save(const QString &path, QString *error) const
                                                                       {QStringLiteral("memorySize"), memorySize}}},
                                {QStringLiteral("tags"), items}};
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) return fail(error, QStringLiteral("无法保存工程：%1").arg(file.errorString()));
+    if (!file.open(QIODevice::WriteOnly)) return fail(error, I18n::tr("Cannot save project: %1").arg(file.errorString()));
     const QByteArray json = QJsonDocument(document).toJson(QJsonDocument::Indented);
     if (file.write(json) != json.size() || !file.commit())
-        return fail(error, QStringLiteral("写入工程失败：%1").arg(file.errorString()));
+        return fail(error, I18n::tr("Cannot write project: %1").arg(file.errorString()));
     if (error) error->clear();
     return true;
 }
 
 bool Project::load(const QString &path, Project *project, QString *error)
 {
-    if (!project) return fail(error, QStringLiteral("工程输出指针为空"));
+    if (!project) return fail(error, I18n::tr("Project output pointer is null"));
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) return fail(error, QStringLiteral("无法打开工程：%1").arg(file.errorString()));
-    if (file.size() > 8 * 1024 * 1024) return fail(error, QStringLiteral("工程文件不能超过 8 MiB"));
+    if (!file.open(QIODevice::ReadOnly)) return fail(error, I18n::tr("Cannot open project: %1").arg(file.errorString()));
+    if (file.size() > 8 * 1024 * 1024) return fail(error, I18n::tr("Project file cannot exceed 8 MiB"));
     QJsonParseError jsonError;
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &jsonError);
     if (jsonError.error != QJsonParseError::NoError || !document.isObject())
-        return fail(error, QStringLiteral("无效工程 JSON：%1").arg(jsonError.errorString()));
+        return fail(error, I18n::tr("Invalid project JSON: %1").arg(jsonError.errorString()));
     const QJsonObject root = document.object();
     if (root.value(QStringLiteral("format")) != QJsonValue(QStringLiteral("FluentPLC-Simulator"))
         || !integerIn(root.value(QStringLiteral("version")), 1, 1))
-        return fail(error, QStringLiteral("不支持的工程格式或版本"));
+        return fail(error, I18n::tr("Unsupported project format or version"));
     if (!root.value(QStringLiteral("name")).isString() || !root.value(QStringLiteral("server")).isObject()
         || !root.value(QStringLiteral("tags")).isArray())
-        return fail(error, QStringLiteral("工程缺少有效的 name、server 或 tags"));
+        return fail(error, I18n::tr("Project must contain valid name, server and tags fields"));
     const QJsonObject server = root.value(QStringLiteral("server")).toObject();
     if (!server.value(QStringLiteral("bindAddress")).isString()
         || !integerIn(server.value(QStringLiteral("port")), 1, 65535)
         || !integerIn(server.value(QStringLiteral("memorySize")), 1, 65535))
-        return fail(error, QStringLiteral("server 的监听地址、端口或内存大小无效"));
+        return fail(error, I18n::tr("Server bind address, port or memory size is invalid"));
     Project candidate;
     candidate.name = root.value(QStringLiteral("name")).toString();
     candidate.bindAddress = server.value(QStringLiteral("bindAddress")).toString();
     candidate.port = quint16(server.value(QStringLiteral("port")).toInt());
     candidate.memorySize = server.value(QStringLiteral("memorySize")).toInt();
     const QJsonArray items = root.value(QStringLiteral("tags")).toArray();
-    if (items.size() > kMaximumTags) return fail(error, QStringLiteral("标签数量不能超过 %1").arg(kMaximumTags));
+    if (items.size() > kMaximumTags) return fail(error, I18n::tr("A project can contain at most %1 tags").arg(kMaximumTags));
     for (int i = 0; i < items.size(); ++i) {
-        if (!items.at(i).isObject()) return fail(error, QStringLiteral("标签 %1 必须是对象").arg(i + 1));
+        if (!items.at(i).isObject()) return fail(error, I18n::tr("Tag %1 must be an object").arg(i + 1));
         const QJsonObject object = items.at(i).toObject();
         for (const QString &key : {QStringLiteral("name"), QStringLiteral("address"), QStringLiteral("dataType")})
-            if (!object.value(key).isString()) return fail(error, QStringLiteral("标签 %1 的 %2 必须是文本").arg(i + 1).arg(key));
+            if (!object.value(key).isString()) return fail(error, I18n::tr("Tag %1 field %2 must be text").arg(i + 1).arg(key));
         const QJsonValue initial = object.value(QStringLiteral("initialValue"));
         if (!initial.isDouble() && !initial.isBool() && !initial.isString())
-            return fail(error, QStringLiteral("标签 %1 的 initialValue 必须为数值、BOOL 或数值文本").arg(i + 1));
+            return fail(error, I18n::tr("Tag %1 initialValue must be a number, BOOL or numeric text").arg(i + 1));
         Tag tag;
         tag.name = object.value(QStringLiteral("name")).toString();
         tag.address = object.value(QStringLiteral("address")).toString();
@@ -279,13 +280,13 @@ bool Project::load(const QString &path, Project *project, QString *error)
         tag.initialValue = initial.toVariant();
         for (const QString &key : {QStringLiteral("mode"), QStringLiteral("source")}) {
             if (!object.value(key).isUndefined() && !object.value(key).isString())
-                return fail(error, QStringLiteral("标签 %1 的 %2 必须是文本").arg(i + 1).arg(key));
+                return fail(error, I18n::tr("Tag %1 field %2 must be text").arg(i + 1).arg(key));
         }
         if (object.contains(QStringLiteral("mode"))) tag.mode = object.value(QStringLiteral("mode")).toString();
         if (object.contains(QStringLiteral("source"))) tag.source = object.value(QStringLiteral("source")).toString();
         for (const QString &key : {QStringLiteral("minimum"), QStringLiteral("maximum"), QStringLiteral("periodSeconds")})
             if (!object.value(key).isUndefined() && !finiteNumber(object.value(key)))
-                return fail(error, QStringLiteral("标签 %1 的 %2 必须为有限数值").arg(i + 1).arg(key));
+                return fail(error, I18n::tr("Tag %1 field %2 must be a finite number").arg(i + 1).arg(key));
         if (object.contains(QStringLiteral("minimum"))) tag.minimum = object.value(QStringLiteral("minimum")).toDouble();
         if (object.contains(QStringLiteral("maximum"))) tag.maximum = object.value(QStringLiteral("maximum")).toDouble();
         if (object.contains(QStringLiteral("periodSeconds"))) tag.periodSeconds = object.value(QStringLiteral("periodSeconds")).toDouble();
