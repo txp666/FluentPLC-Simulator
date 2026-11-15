@@ -15,7 +15,7 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("FluentPLC"));
     app.setApplicationName(QStringLiteral("FluentPLCServer"));
-    app.setApplicationVersion(QStringLiteral("0.1.0"));
+    app.setApplicationVersion(QStringLiteral(FPLC_VERSION));
     // CLI runs follow the system unless explicitly overridden, and never change the
     // GUI's persisted preference. Select before constructing translated help.
     QString requestedLanguage = QStringLiteral("Auto");

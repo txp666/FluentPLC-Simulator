@@ -77,6 +77,7 @@ target_link_libraries(fplc_core PUBLIC Qt6::Core Qt6::Network snap7_cpp)
 
 add_executable(FluentPLCServer src/server_main.cpp)
 target_link_libraries(FluentPLCServer PRIVATE fplc_core)
+target_compile_definitions(FluentPLCServer PRIVATE FPLC_VERSION="${PROJECT_VERSION}")
 add_library(fplc_update STATIC src/update/update_release.h src/update/update_release.cpp
     src/update/update_service.h src/update/update_service.cpp
     src/update/update_installer.h src/update/update_installer.cpp)
