@@ -1,0 +1,89 @@
+{
+    "format": "FluentPLC-Simulator",
+    "name": "S7 测试台",
+    "server": {
+        "bindAddress": "127.0.0.1",
+        "memorySize": 512,
+        "port": 1102
+    },
+    "tags": [
+        {
+            "address": "DB1.DBX0.0",
+            "dataType": "BOOL",
+            "initialValue": false,
+            "maximum": 1,
+            "minimum": 0,
+            "mode": "follow",
+            "name": "运行状态",
+            "periodSeconds": 10,
+            "source": "DB1.DBX0.1"
+        },
+        {
+            "address": "DB1.DBX0.1",
+            "dataType": "BOOL",
+            "initialValue": false,
+            "maximum": 100,
+            "minimum": 0,
+            "mode": "manual",
+            "name": "启动请求",
+            "periodSeconds": 10,
+            "source": ""
+        },
+        {
+            "address": "DB1.DBD4",
+            "dataType": "REAL",
+            "initialValue": 50,
+            "maximum": 80,
+            "minimum": 20,
+            "mode": "sine",
+            "name": "温度",
+            "periodSeconds": 10,
+            "source": ""
+        },
+        {
+            "address": "DB1.DBD8",
+            "dataType": "REAL",
+            "initialValue": 0,
+            "maximum": 10,
+            "minimum": 0,
+            "mode": "ramp",
+            "name": "压力",
+            "periodSeconds": 10,
+            "source": ""
+        },
+        {
+            "address": "DB1.DBW12",
+            "dataType": "INT",
+            "initialValue": 1200,
+            "maximum": 100,
+            "minimum": 0,
+            "mode": "manual",
+            "name": "速度",
+            "periodSeconds": 10,
+            "source": ""
+        },
+        {
+            "address": "M0.0",
+            "dataType": "BOOL",
+            "initialValue": false,
+            "maximum": 1,
+            "minimum": 0,
+            "mode": "toggle",
+            "name": "心跳",
+            "periodSeconds": 2,
+            "source": ""
+        },
+        {
+            "address": "Q0.0",
+            "dataType": "BOOL",
+            "initialValue": false,
+            "maximum": 1,
+            "minimum": 0,
+            "mode": "follow",
+            "name": "输出状态",
+            "periodSeconds": 10,
+            "source": "DB1.DBX0.1"
+        }
+    ],
+    "version": 1
+}

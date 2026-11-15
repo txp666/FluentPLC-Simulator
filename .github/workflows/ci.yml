@@ -1,0 +1,45 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.12.0'
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git'
+          cache: true
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+        if: runner.os != 'Windows'
+      - name: Configure
+        if: runner.os != 'Windows'
+        run: cmake --preset release
+      - name: Configure MSVC
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 -DFPLC_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build/release --config Release --parallel
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build/release -C Release --output-on-failure --no-tests=error
+      - name: Validate example
+        if: runner.os != 'Windows'
+        run: build/release/FluentPLCServer --project examples/hmi-demo.plcsim.json --check
+      - name: Validate example on Windows
+        if: runner.os == 'Windows'
+        run: build/release/Release/FluentPLCServer.exe --project examples/hmi-demo.plcsim.json --check
