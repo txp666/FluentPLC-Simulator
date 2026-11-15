@@ -143,7 +143,7 @@ if(FPLC_BUILD_TESTS)
         add_custom_command(TARGET tst_ui POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:snap7> $<TARGET_FILE_DIR:tst_ui>)
     endif()
-    add_test(NAME ui COMMAND tst_ui)
+    add_test(NAME ui COMMAND tst_ui -o ui-test-results.txt,txt)
     set_tests_properties(ui PROPERTIES TIMEOUT 120 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(tst_i18n tests/tst_i18n.cpp)
     target_link_libraries(tst_i18n PRIVATE fplc_core Qt6::Test)
