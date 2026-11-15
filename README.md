@@ -79,3 +79,13 @@ macOS 的 Qt 目录通常以 `macos` 结尾；Windows 在对应 Qt 编译器环�
 自动化测试使用真实 `TS7Client` 连接本机随机高端口，覆盖网络读写、BOOL 位写保留邻位、规则反馈、工程校验和生命周期。两端都使用 Snap7，因此还应使用独立实现的客户端进行交叉验证，例如纯 Python 的 `python-snap7` 3.x；其具体 API 和位写行为需按固定版本确认。测试不需要真实 PLC。
 
 应用代码采用 GPL-3.0；原生 Snap7 采用 LGPL-3.0-or-later，保留其独立许可证及固定子模块来源。分发时应连同本项目许可证、Snap7 许可证和相应源码信息一起提供。当前平台的实际构建、桌面启动及跨实现客户端验证状态在 [测试说明](docs/testing.md) 中单独记录；没有记录的项目不能视为已经验证。
+
+## macOS 应用打包
+
+完成 Release 构建后运行：
+
+```bash
+python3 scripts/package_macos.py --build-dir build/release
+```
+
+生成 `dist/FluentPLC Simulator.app`，包含 Qt、Snap7、无界面服务程序、示例和许可证。打包脚本不会覆盖已有应用，可用 `--output` 选择新路径。

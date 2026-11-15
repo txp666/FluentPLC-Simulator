@@ -872,7 +872,10 @@ void MainWindow::updateState()
 
 void MainWindow::updateTitle()
 {
-    setWindowTitle(QStringLiteral("%1[*] — FluentPLC Simulator").arg(m_project.name));
+    // The custom Fluent title bar displays the title literally, so render the
+    // unsaved marker instead of Qt's native-window [*] placeholder.
+    setWindowTitle(QStringLiteral("%1%2 — FluentPLC Simulator")
+                       .arg(m_project.name, m_dirty ? QStringLiteral(" *") : QString()));
     setWindowModified(m_dirty);
     const QString file = m_projectPath.isEmpty() ? tr("尚未保存为文件") : m_projectPath;
     m_projectLabel->setText(QStringLiteral("%1  ·  %2%3").arg(m_project.name, file, m_dirty ? tr("  ·  未保存") : QString()));

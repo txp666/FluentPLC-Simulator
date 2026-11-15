@@ -76,3 +76,7 @@ Release 构建及 Windows/Linux 运行状态仍待验证。CI 配置不等同于
 ### 打包应用原生启动
 
 通过 macOS Launch Services 启动便携 `.app` 并生成实际窗口截图，应用正常启动和退出。已检查原生窗口的文字、布局、服务配置及变量表；截图见 `docs/images/main-window.png`。生产包使用 Cocoa 平台插件，测试构建使用 offscreen 插件。
+
+### macOS Release 构建
+
+在本机 Apple Silicon 上完成 Release 全量构建。优化构建的 CTest 三组全部通过（simulator / ui / native_sigpipe，7.79 秒），最终窗口标题调整后只重跑受影响的 UI 组并通过。已检查 Release 原生窗口截图；便携应用的生成命令为 `python3 scripts/package_macos.py --build-dir build/release --output "dist/FluentPLC-Simulator-0.1.0-macOS-arm64/FluentPLC Simulator.app"`。
