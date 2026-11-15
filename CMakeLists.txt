@@ -17,6 +17,9 @@ include("${FLUENTQTWIDGETS_ROOT}/cmake/FqwLocateQt.cmake")
 fqw_locate_qt(6.12)
 find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets Svg Network)
 find_package(Threads REQUIRED)
+add_executable(render_logo tools/render_logo.cpp)
+set_target_properties(render_logo PROPERTIES AUTOMOC OFF)
+target_link_libraries(render_logo PRIVATE Qt6::Core Qt6::Gui Qt6::Svg)
 
 # Keep the pinned submodule untouched; apply modern macOS fixes to a build copy.
 set(SNAP7_SOURCE_ROOT "${SNAP7_ROOT}")
@@ -66,7 +69,8 @@ set(FQW_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 add_subdirectory("${FLUENTQTWIDGETS_ROOT}" "${CMAKE_BINARY_DIR}/_deps/fluentqtwidgets" EXCLUDE_FROM_ALL)
 
 add_library(fplc_core STATIC src/core/project.h src/core/project.cpp src/core/address.h src/core/address.cpp
-    src/core/codec.h src/core/codec.cpp src/plc/plc_server.h src/plc/plc_server.cpp)
+    src/core/codec.h src/core/codec.cpp src/core/i18n.h src/core/i18n.cpp resources/i18n.qrc
+    src/plc/plc_server.h src/plc/plc_server.cpp)
 target_include_directories(fplc_core PUBLIC src)
 target_link_libraries(fplc_core PUBLIC Qt6::Core Qt6::Network snap7_cpp)
 
@@ -82,6 +86,16 @@ set_target_properties(FluentPLCSimulator PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.txp666.FluentPLCSimulator"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+if(APPLE)
+    target_sources(FluentPLCSimulator PRIVATE resources/logo.icns)
+    set_source_files_properties(resources/logo.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(FluentPLCSimulator PROPERTIES MACOSX_BUNDLE_ICON_FILE logo.icns)
+elseif(WIN32)
+    enable_language(RC)
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/fplc_icon.rc"
+        CONTENT "1 ICON \"${CMAKE_CURRENT_SOURCE_DIR}/resources/logo.ico\"\n")
+    target_sources(FluentPLCSimulator PRIVATE "${CMAKE_BINARY_DIR}/fplc_icon.rc")
+endif()
 if(MSVC)
     target_compile_options(fplc_core PRIVATE /utf-8)
     target_compile_options(fplc_ui PRIVATE /utf-8)
@@ -120,6 +134,18 @@ if(FPLC_BUILD_TESTS)
     endif()
     add_test(NAME ui COMMAND tst_ui)
     set_tests_properties(ui PROPERTIES TIMEOUT 120 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(tst_i18n tests/tst_i18n.cpp)
+    target_link_libraries(tst_i18n PRIVATE fplc_core Qt6::Test)
+    target_compile_definitions(tst_i18n PRIVATE FPLC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(tst_i18n PRIVATE /utf-8)
+    endif()
+    if(WIN32)
+        add_custom_command(TARGET tst_i18n POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:snap7> $<TARGET_FILE_DIR:tst_i18n>)
+    endif()
+    add_test(NAME i18n COMMAND tst_i18n)
+    set_tests_properties(i18n PROPERTIES TIMEOUT 30)
     if(APPLE)
         add_executable(snap7_sigpipe_probe tests/snap7_sigpipe_probe.cpp)
         set_target_properties(snap7_sigpipe_probe PROPERTIES AUTOMOC OFF)

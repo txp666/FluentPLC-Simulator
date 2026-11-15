@@ -1,18 +1,29 @@
 #include "app/main_window.h"
+#include "core/i18n.h"
 #include "plc/plc_server.h"
+
+#include <FluentQtWidgets/Theme.h>
+#include <FluentQtWidgets/ThemeListener.h>
+#include <FluentQtWidgets/Widgets/ComboBox.h>
 
 #include <snap7.h>
 #include <QtCore/QFile>
 #include <QtCore/QPointer>
 #include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtCore/QtEndian>
 #include <QtNetwork/QTcpServer>
 #include <QtTest/QTest>
+#include <QtTest/QSignalSpy>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QDialog>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QScrollArea>
+#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QStyleFactory>
 #include <QtWidgets/QTableWidget>
@@ -69,6 +80,10 @@ private slots:
     void startAndStopButtonsControlRealS7Connection();
     void tableEditWritesCurrentValueWithoutResettingOthers();
     void projectRoundTripAndFailuresPreserveState();
+    void languageSelectionIsImmediateAndPersistent();
+    void themeSelectionIsImmediateAndPersistent();
+    void openVariableDialogKeepsInputWhenLanguageChanges();
+    void repositoryCardIsTranslatedAndReachable();
 };
 
 void UiTest::defaultWindowDoesNotListen()
@@ -87,6 +102,14 @@ void UiTest::defaultWindowDoesNotListen()
     QVERIFY(start->isEnabled());
     QVERIFY(!stop->isEnabled());
     QCOMPARE(port->value(), 1102);
+    auto *language = window.findChild<FluentQt::ComboBox *>(QStringLiteral("languageCombo"));
+    auto *theme = window.findChild<FluentQt::ComboBox *>(QStringLiteral("themeCombo"));
+    QVERIFY(language && theme);
+    QCOMPARE(fplc::I18n::setting(), QStringLiteral("Auto"));
+    QCOMPARE(language->currentData().toString(), QStringLiteral("Auto"));
+    QCOMPARE(theme->currentData().toString(), QStringLiteral("Auto"));
+    QCOMPARE(FluentQt::ThemeManager::instance()->theme(), FluentQt::Theme::Auto);
+    QVERIFY(FluentQt::ThemeManager::instance()->systemThemeListener()->isRunning());
 }
 
 void UiTest::startAndStopButtonsControlRealS7Connection()
@@ -125,6 +148,43 @@ void UiTest::startAndStopButtonsControlRealS7Connection()
     QCOMPARE(client.DBWrite(1, 0, 2, bytes.data()), 0);
     QTRY_COMPARE(window.server()->value(0).toInt(), 77);
     QTRY_COMPARE(window.server()->clientCount(), 1);
+
+    auto *language = window.findChild<FluentQt::ComboBox *>(QStringLiteral("languageCombo"));
+    auto *theme = window.findChild<FluentQt::ComboBox *>(QStringLiteral("themeCombo"));
+    QVERIFY(language && theme);
+    auto *server = window.server();
+    const auto *projectReference = &window.project();
+    const auto *tagDefinitions = window.project().tags.constData();
+    const QString projectName = window.project().name;
+    QVERIFY2(server->setValue(1, 321, &error), qPrintable(error));
+    QSignalSpy stateChanges(server, &fplc::PlcServer::stateChanged);
+    for (const QString &locale : {QStringLiteral("zh_CN"), QStringLiteral("en_US"), QStringLiteral("Auto")}) {
+        language->setCurrentIndex(language->findData(locale));
+        QTRY_COMPARE(fplc::I18n::setting(), locale);
+        QCOMPARE(window.server(), server);
+        QCOMPARE(&window.project(), projectReference);
+        QCOMPARE(window.project().tags.constData(), tagDefinitions);
+        QCOMPARE(window.project().name, projectName);
+        QCOMPARE(server->value(0).toInt(), 77);
+        QCOMPARE(server->value(1).toInt(), 321);
+        QCOMPARE(client.DBRead(1, 0, 2, bytes.data()), 0);
+        QCOMPARE(qFromBigEndian<qint16>(bytes.constData()), qint16(77));
+        QCOMPARE(stateChanges.count(), 0);
+        QVERIFY(!window.isWindowModified());
+    }
+    for (const QString &setting : {QStringLiteral("Light"), QStringLiteral("Dark"), QStringLiteral("Auto")}) {
+        theme->setCurrentIndex(theme->findData(setting));
+        QCOMPARE(QSettings().value(QStringLiteral("ui/theme")).toString(), setting);
+        QVERIFY(server->isRunning());
+        QCOMPARE(server->clientCount(), 1);
+        QCOMPARE(server->value(0).toInt(), 77);
+        QCOMPARE(server->value(1).toInt(), 321);
+        QCOMPARE(client.DBRead(1, 0, 2, bytes.data()), 0);
+        QCOMPARE(qFromBigEndian<qint16>(bytes.constData()), qint16(77));
+        QCOMPARE(window.project().tags.constData(), tagDefinitions);
+        QCOMPARE(stateChanges.count(), 0);
+        QVERIFY(!window.isWindowModified());
+    }
 
     QTest::mouseClick(stop, Qt::LeftButton);
     QVERIFY(!window.server()->isRunning());
@@ -220,6 +280,191 @@ void UiTest::projectRoundTripAndFailuresPreserveState()
     QCOMPARE(window.server()->value(0).toInt(), 444);
 }
 
+void UiTest::languageSelectionIsImmediateAndPersistent()
+{
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("en_US"), false));
+    fplc::MainWindow window;
+    auto *language = window.findChild<FluentQt::ComboBox *>(QStringLiteral("languageCombo"));
+    auto *start = window.findChild<QPushButton *>(QStringLiteral("startServerButton"));
+    auto *table = window.findChild<QTableWidget *>(QStringLiteral("tagTable"));
+    QVERIFY(language && start && table);
+    QCOMPARE(start->text(), QStringLiteral("Start server"));
+    QCOMPARE(table->horizontalHeaderItem(3)->text(), QStringLiteral("Current value"));
+    QCOMPARE(language->itemData(0).toString(), QStringLiteral("Auto"));
+    QCOMPARE(language->itemData(1).toString(), QStringLiteral("en_US"));
+    QCOMPARE(language->itemData(2).toString(), QStringLiteral("zh_CN"));
+    const QString userName = window.project().tags.first().name;
+    const QString projectName = window.project().name;
+    const auto *tagDefinitions = window.project().tags.constData();
+
+    language->setCurrentIndex(language->findData(QStringLiteral("zh_CN")));
+    QTRY_COMPARE(fplc::I18n::language(), QStringLiteral("zh_CN"));
+    QTRY_COMPARE(start->text(), QStringLiteral("启动服务"));
+    QCOMPARE(table->horizontalHeaderItem(3)->text(), QStringLiteral("当前值"));
+    QCOMPARE(table->item(0, 0)->text(), userName);
+    QCOMPARE(window.project().name, projectName);
+    QCOMPARE(window.project().tags.constData(), tagDefinitions);
+    QCOMPARE(QSettings().value(QStringLiteral("ui/language")).toString(), QStringLiteral("zh_CN"));
+    QVERIFY(!window.isWindowModified());
+
+    // Recreate startup selection from the stored preference, not the current process override.
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("en_US"), false));
+    fplc::I18n::initialize(qApp);
+    QTRY_COMPARE(fplc::I18n::setting(), QStringLiteral("zh_CN"));
+    QTRY_COMPARE(start->text(), QStringLiteral("启动服务"));
+    QCOMPARE(language->currentData().toString(), QStringLiteral("zh_CN"));
+    language->setCurrentIndex(language->findData(QStringLiteral("en_US")));
+    QTRY_COMPARE(start->text(), QStringLiteral("Start server"));
+    QCOMPARE(table->horizontalHeaderItem(3)->text(), QStringLiteral("Current value"));
+    QCOMPARE(QSettings().value(QStringLiteral("ui/language")).toString(), QStringLiteral("en_US"));
+    language->setCurrentIndex(language->findData(QStringLiteral("Auto")));
+    QTRY_COMPARE(fplc::I18n::setting(), QStringLiteral("Auto"));
+    QCOMPARE(language->currentData().toString(), QStringLiteral("Auto"));
+    QCOMPARE(QSettings().value(QStringLiteral("ui/language")).toString(), QStringLiteral("Auto"));
+}
+
+void UiTest::themeSelectionIsImmediateAndPersistent()
+{
+    fplc::MainWindow window;
+    auto *theme = window.findChild<FluentQt::ComboBox *>(QStringLiteral("themeCombo"));
+    auto *manager = FluentQt::ThemeManager::instance();
+    QVERIFY(theme);
+    QCOMPARE(theme->itemData(0).toString(), QStringLiteral("Auto"));
+    QCOMPARE(theme->itemData(1).toString(), QStringLiteral("Light"));
+    QCOMPARE(theme->itemData(2).toString(), QStringLiteral("Dark"));
+
+    theme->setCurrentIndex(theme->findData(QStringLiteral("Dark")));
+    QCOMPARE(manager->theme(), FluentQt::Theme::Dark);
+    QCOMPARE(manager->effectiveTheme(), FluentQt::Theme::Dark);
+    QVERIFY(qApp->palette().color(QPalette::Window).lightness() < 128);
+    QCOMPARE(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("Dark"));
+    {
+        fplc::MainWindow restored;
+        auto *restoredTheme = restored.findChild<FluentQt::ComboBox *>(QStringLiteral("themeCombo"));
+        QVERIFY(restoredTheme);
+        QCOMPARE(restoredTheme->currentData().toString(), QStringLiteral("Dark"));
+        QCOMPARE(manager->effectiveTheme(), FluentQt::Theme::Dark);
+    }
+    theme->setCurrentIndex(theme->findData(QStringLiteral("Light")));
+    QCOMPARE(manager->theme(), FluentQt::Theme::Light);
+    QCOMPARE(manager->effectiveTheme(), FluentQt::Theme::Light);
+    QVERIFY(qApp->palette().color(QPalette::Window).lightness() >= 128);
+    QCOMPARE(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("Light"));
+    theme->setCurrentIndex(theme->findData(QStringLiteral("Auto")));
+    QCOMPARE(manager->theme(), FluentQt::Theme::Auto);
+    QVERIFY(manager->systemThemeListener()->isRunning());
+    manager->systemThemeListener()->refresh();
+    QCOMPARE(manager->effectiveTheme(), manager->systemThemeListener()->systemTheme());
+    QCOMPARE(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("Auto"));
+    QVERIFY(!window.isWindowModified());
+}
+
+void UiTest::openVariableDialogKeepsInputWhenLanguageChanges()
+{
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("en_US"), false));
+    fplc::MainWindow window;
+    window.show();
+    auto *add = window.findChild<QPushButton *>(QStringLiteral("addTagButton"));
+    QVERIFY(add);
+    bool dialogFound = false;
+    bool translated = false;
+    bool restored = false;
+    bool inputPreserved = false;
+    QTimer::singleShot(2000, &window, [&] {
+        if (auto *dialog = window.findChild<QDialog *>(QStringLiteral("tagDialog"))) dialog->reject();
+    });
+    QTimer::singleShot(0, &window, [&] {
+        auto *dialog = window.findChild<QDialog *>(QStringLiteral("tagDialog"));
+        if (!dialog) return;
+        dialogFound = true;
+        auto *name = dialog->findChild<QLineEdit *>(QStringLiteral("tagNameEdit"));
+        auto *initial = dialog->findChild<QLineEdit *>(QStringLiteral("tagInitialValueEdit"));
+        auto *save = dialog->findChild<QPushButton *>(QStringLiteral("tagAcceptButton"));
+        if (name && initial && save) {
+            name->setText(QStringLiteral("User-defined 名称"));
+            initial->setText(QStringLiteral("12.75"));
+            fplc::I18n::setLanguage(QStringLiteral("zh_CN"), false);
+            QCoreApplication::processEvents();
+            translated = save->text() == QStringLiteral("保存变量");
+            inputPreserved = name->text() == QStringLiteral("User-defined 名称") && initial->text() == QStringLiteral("12.75");
+            fplc::I18n::setLanguage(QStringLiteral("en_US"), false);
+            QCoreApplication::processEvents();
+            restored = save->text() == QStringLiteral("Save variable") && name->text() == QStringLiteral("User-defined 名称")
+                && initial->text() == QStringLiteral("12.75");
+        }
+        dialog->reject();
+    });
+    QTest::mouseClick(add, Qt::LeftButton);
+    QVERIFY(dialogFound);
+    QVERIFY(translated);
+    QVERIFY(inputPreserved);
+    QVERIFY(restored);
+    QVERIFY(!window.isWindowModified());
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("Auto"), false));
+}
+
+void UiTest::repositoryCardIsTranslatedAndReachable()
+{
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("en_US"), false));
+    const QString previousVersion = QCoreApplication::applicationVersion();
+    QCoreApplication::setApplicationVersion(QStringLiteral("9.9.9-ui"));
+    fplc::MainWindow window;
+    QCoreApplication::setApplicationVersion(previousVersion);
+    auto *repository = window.findChild<QWidget *>(QStringLiteral("repositoryCard"));
+    auto *title = window.findChild<QLabel *>(QStringLiteral("repositoryTitleLabel"));
+    auto *name = window.findChild<QLabel *>(QStringLiteral("repositoryNameLabel"));
+    auto *version = window.findChild<QLabel *>(QStringLiteral("repositoryVersionLabel"));
+    auto *license = window.findChild<QLabel *>(QStringLiteral("repositoryLicenseLabel"));
+    auto *issues = window.findChild<QPushButton *>(QStringLiteral("reportIssueButton"));
+    auto *releases = window.findChild<QPushButton *>(QStringLiteral("releasesButton"));
+    auto *related = window.findChild<QLabel *>(QStringLiteral("relatedProjectsLabel"));
+    auto *link = window.findChild<QPushButton *>(QStringLiteral("repositoryLink"));
+    QVERIFY(repository && title && name && version && license && issues && releases && related && link);
+    QCOMPARE(title->text(), QStringLiteral("Repository"));
+    QCOMPARE(name->text(), QStringLiteral("FluentPLC Simulator"));
+    QCOMPARE(version->text(), QStringLiteral("9.9.9-ui"));
+    QCOMPARE(license->text(), QStringLiteral("GPL-3.0"));
+    auto safeRepositoryUrl = [](const QUrl &url) {
+        return url.isValid() && !url.isRelative() && url.scheme() == QStringLiteral("https")
+            && url.host() == QStringLiteral("github.com") && url.path().startsWith(QStringLiteral("/txp666/"))
+            && url.userName().isEmpty() && url.password().isEmpty() && !url.hasQuery() && !url.hasFragment();
+    };
+    QVERIFY(safeRepositoryUrl(link->property("url").toUrl()));
+    int actionCount = 0;
+    for (auto *button : repository->findChildren<QPushButton *>()) {
+        if (!button->property("externalUrl").isValid()) continue;
+        QVERIFY(safeRepositoryUrl(button->property("externalUrl").toUrl()));
+        ++actionCount;
+    }
+    QCOMPARE(actionCount, 6);
+
+    QVERIFY(window.switchTo(QStringLiteral("settingsPage")));
+    window.resize(window.minimumSize());
+    window.show();
+    auto *page = window.findChild<QScrollArea *>(QStringLiteral("settingsPage"));
+    auto *web = window.findChild<QPushButton *>(QStringLiteral("relatedWebButton"));
+    auto *language = window.findChild<FluentQt::ComboBox *>(QStringLiteral("languageCombo"));
+    QVERIFY(page && web && language);
+    QTRY_VERIFY(page->verticalScrollBar()->maximum() > 0);
+    page->ensureWidgetVisible(web);
+    QTRY_VERIFY(!web->visibleRegion().isEmpty());
+    page->ensureWidgetVisible(language);
+    QTRY_VERIFY(!language->visibleRegion().isEmpty());
+
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("zh_CN"), false));
+    QTRY_COMPARE(title->text(), QStringLiteral("项目仓库"));
+    QCOMPARE(issues->text(), QStringLiteral("反馈问题"));
+    QCOMPARE(releases->text(), QStringLiteral("发行版本"));
+    QCOMPARE(related->text(), QStringLiteral("相关项目"));
+    QCOMPARE(name->text(), QStringLiteral("FluentPLC Simulator"));
+    QCOMPARE(version->text(), QStringLiteral("9.9.9-ui"));
+    QVERIFY(!window.isWindowModified());
+    QVERIFY(!window.server()->isRunning());
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("en_US"), false));
+    QTRY_COMPARE(title->text(), QStringLiteral("Repository"));
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("Auto"), false));
+}
+
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
@@ -231,6 +476,7 @@ int main(int argc, char **argv)
     if (!settings.isValid()) return 1;
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    fplc::I18n::initialize(&app);
     UiTest test;
     return QTest::qExec(&test, argc, argv);
 }

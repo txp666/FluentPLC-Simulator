@@ -1,8 +1,13 @@
 #include "app/main_window.h"
+#include "core/i18n.h"
 #include "plc/plc_server.h"
 
 #include <FluentQtWidgets/Dialogs/Dialog.h>
 #include <FluentQtWidgets/FluentIcon.h>
+#include <FluentQtWidgets/Layout/FlowLayout.h>
+#include <FluentQtWidgets/Navigation/NavigationInterface.h>
+#include <FluentQtWidgets/Navigation/NavigationTreeWidget.h>
+#include <FluentQtWidgets/Navigation/NavigationWidget.h>
 #include <FluentQtWidgets/Theme.h>
 #include <FluentQtWidgets/Views/ItemViews.h>
 #include <FluentQtWidgets/Widgets/Button.h>
@@ -15,12 +20,15 @@
 #include <FluentQtWidgets/Widgets/SpinBox.h>
 
 #include <QtCore/QDateTime>
+#include <QtCore/QEvent>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSettings>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtGui/QAction>
 #include <QtGui/QCloseEvent>
+#include <QtGui/QDesktopServices>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QKeySequence>
 #include <QtGui/QTextDocument>
@@ -41,13 +49,78 @@ namespace {
 
 using namespace FluentQt;
 
+QString translateUi(const char *source, const QStringList &arguments = {})
+{
+    QString text = QCoreApplication::translate("SimulatorUi", source);
+    for (const QString &argument : arguments) text = text.arg(argument);
+    return text;
+}
+
+void bindTranslation(QObject *object, const char *property, const char *source, const QStringList &arguments = {})
+{
+    const QByteArray sourceKey = QByteArrayLiteral("_fplc_source_") + property;
+    const QByteArray argumentsKey = QByteArrayLiteral("_fplc_arguments_") + property;
+    object->setProperty(sourceKey.constData(), QByteArray(source));
+    object->setProperty(argumentsKey.constData(), arguments);
+    object->setProperty(property, translateUi(source, arguments));
+}
+
+void retranslateBindings(QWidget *root)
+{
+    QList<QWidget *> widgets = root->findChildren<QWidget *>();
+    widgets.prepend(root);
+    for (QWidget *widget : widgets) {
+        for (const char *property : {"text", "toolTip", "windowTitle", "placeholderText", "suffix"}) {
+            const QByteArray sourceKey = QByteArrayLiteral("_fplc_source_") + property;
+            const QVariant source = widget->property(sourceKey.constData());
+            if (!source.isValid()) continue;
+            const QByteArray argumentsKey = QByteArrayLiteral("_fplc_arguments_") + property;
+            widget->setProperty(property, translateUi(source.toByteArray().constData(), widget->property(argumentsKey.constData()).toStringList()));
+        }
+        auto *combo = qobject_cast<ComboBox *>(widget);
+        if (!combo) continue;
+        const QStringList sources = combo->property("_fplc_item_sources").toStringList();
+        const QSignalBlocker blocker(combo);
+        for (int index = 0; index < sources.size(); ++index) combo->setItemText(index, translateUi(sources.at(index).toUtf8().constData()));
+    }
+}
+
+template<class Label>
+Label *translatedLabel(const char *source, QWidget *parent = nullptr)
+{
+    auto *label = new Label(parent);
+    bindTranslation(label, "text", source);
+    return label;
+}
+
+template<class Button>
+Button *translatedButton(const QIcon &icon, const char *source, QWidget *parent)
+{
+    auto *button = new Button(icon, translateUi(source), parent);
+    bindTranslation(button, "text", source);
+    return button;
+}
+
+void translatedFormRow(QFormLayout *form, const char *source, QWidget *field)
+{
+    form->addRow(translatedLabel<BodyLabel>(source), field);
+}
+
+void translatedComboItem(ComboBox *combo, const char *source, const QVariant &data)
+{
+    combo->addItem(translateUi(source), {}, data);
+    QStringList sources = combo->property("_fplc_item_sources").toStringList();
+    sources.append(QString::fromUtf8(source));
+    combo->setProperty("_fplc_item_sources", sources);
+}
+
 QString modeLabel(const QString &mode)
 {
-    if (mode == QStringLiteral("sine")) return QObject::tr("正弦波");
-    if (mode == QStringLiteral("ramp")) return QObject::tr("斜坡");
-    if (mode == QStringLiteral("toggle")) return QObject::tr("周期翻转");
-    if (mode == QStringLiteral("follow")) return QObject::tr("跟随变量");
-    return QObject::tr("手动");
+    if (mode == QStringLiteral("sine")) return QObject::tr("Sine wave");
+    if (mode == QStringLiteral("ramp")) return QObject::tr("Ramp");
+    if (mode == QStringLiteral("toggle")) return QObject::tr("Toggle");
+    if (mode == QStringLiteral("follow")) return QObject::tr("Follow");
+    return QObject::tr("Manual");
 }
 
 QString valueText(const QVariant &value, const QString &type)
@@ -71,7 +144,7 @@ bool parseValue(const QString &type, const QString &text, QVariant *value, QStri
             *value = false;
             return true;
         }
-        *error = QObject::tr("BOOL 请输入 true、false、1 或 0。");
+        *error = QObject::tr("Enter true, false, 1 or 0 for BOOL.");
         return false;
     }
     if (type == QStringLiteral("REAL")) {
@@ -80,7 +153,7 @@ bool parseValue(const QString &type, const QString &text, QVariant *value, QStri
             *value = number;
             return true;
         }
-        *error = QObject::tr("REAL 请输入有限数值，例如 23.5。");
+        *error = QObject::tr("Enter a finite REAL value, for example 23.5.");
         return false;
     }
     const bool hex = clean.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)
@@ -91,7 +164,7 @@ bool parseValue(const QString &type, const QString &text, QVariant *value, QStri
         *value = number;
         return true;
     }
-    *error = QObject::tr("请输入整数；也可以使用 0x 开头的十六进制值。");
+    *error = QObject::tr("Enter an integer, or a hexadecimal value starting with 0x.");
     return false;
 }
 
@@ -101,6 +174,13 @@ BodyLabel *description(const QString &text, QWidget *parent)
     label->setWordWrap(true);
     label->setTextColor(QColor(QStringLiteral("#5b6873")), QColor(QStringLiteral("#adbcc4")));
     label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    return label;
+}
+
+BodyLabel *description(const char *source, QWidget *parent)
+{
+    auto *label = description(translateUi(source), parent);
+    bindTranslation(label, "text", source);
     return label;
 }
 
@@ -130,9 +210,9 @@ QVBoxLayout *cardLayout(CardWidget *card)
     return layout;
 }
 
-void pageHeading(QVBoxLayout *layout, const QString &title, const QString &subtitle)
+void pageHeading(QVBoxLayout *layout, const char *title, const char *subtitle)
 {
-    auto *titleLabel = new TitleLabel(title);
+    auto *titleLabel = translatedLabel<TitleLabel>(title);
     layout->addWidget(titleLabel);
     layout->addWidget(description(subtitle, titleLabel->parentWidget()));
 }
@@ -140,18 +220,22 @@ void pageHeading(QVBoxLayout *layout, const QString &title, const QString &subti
 class TagDialog final : public Dialog {
 public:
     TagDialog(const Project &project, int index, QWidget *parent)
-        : Dialog(index < 0 ? tr("新增变量") : tr("编辑变量"),
-                 tr("定义 S7 地址、初始值和变化规则。保存后将重新装载工程初始值。"), parent),
+        : Dialog(index < 0 ? tr("Add variable") : tr("Edit variable"),
+                 tr("Set the S7 address, initial value and rule. Saving reloads the project initial values."), parent),
           m_project(project), m_index(index)
     {
         setObjectName(QStringLiteral("tagDialog"));
-        setWindowTitle(index < 0 ? tr("新增变量") : tr("编辑变量"));
+        const char *titleSource = index < 0 ? QT_TR_NOOP("Add variable") : QT_TR_NOOP("Edit variable");
+        bindTranslation(this, "windowTitle", titleSource);
+        bindTranslation(titleLabel(), "text", titleSource);
+        bindTranslation(windowTitleLabel(), "text", titleSource);
+        bindTranslation(contentLabel(), "text", QT_TR_NOOP("Set the S7 address, initial value and rule. Saving reloads the project initial values."));
         setMinimumWidth(560);
         Tag tag;
         if (index >= 0) {
             tag = project.tags.at(index);
         } else {
-            tag.name = tr("变量 %1").arg(project.tags.size() + 1);
+            tag.name = tr("Tag %1").arg(project.tags.size() + 1);
             tag.address = QStringLiteral("DB1.DBD%1").arg(project.tags.size() * 4);
             if (!project.tags.isEmpty()) tag.source = project.tags.first().address;
         }
@@ -191,19 +275,19 @@ public:
         m_maximum = numberSpin(QStringLiteral("tagMaximumSpin"), tag.maximum);
         m_period = numberSpin(QStringLiteral("tagPeriodSpin"), tag.periodSeconds);
         m_period->setRange(0.001, 1e9);
-        m_period->setSuffix(tr(" 秒"));
+        bindTranslation(m_period, "suffix", QT_TR_NOOP(" s"));
         m_source = new LineEdit(tag.source, view());
         m_source->setObjectName(QStringLiteral("tagSourceEdit"));
-        m_source->setPlaceholderText(tr("来源变量地址，例如 DB1.DBX8.0"));
-        form->addRow(tr("变量名称"), m_name);
-        form->addRow(tr("S7 地址"), m_address);
-        form->addRow(tr("数据类型"), m_type);
-        form->addRow(tr("初始值"), m_initial);
-        form->addRow(tr("变化规则"), m_mode);
-        form->addRow(tr("最小值"), m_minimum);
-        form->addRow(tr("最大值"), m_maximum);
-        form->addRow(tr("周期"), m_period);
-        form->addRow(tr("跟随地址"), m_source);
+        bindTranslation(m_source, "placeholderText", QT_TR_NOOP("Source address, for example DB1.DBX8.0"));
+        translatedFormRow(form, QT_TR_NOOP("Variable name"), m_name);
+        translatedFormRow(form, QT_TR_NOOP("S7 address"), m_address);
+        translatedFormRow(form, QT_TR_NOOP("Data type"), m_type);
+        translatedFormRow(form, QT_TR_NOOP("Initial value"), m_initial);
+        translatedFormRow(form, QT_TR_NOOP("Rule"), m_mode);
+        translatedFormRow(form, QT_TR_NOOP("Minimum"), m_minimum);
+        translatedFormRow(form, QT_TR_NOOP("Maximum"), m_maximum);
+        translatedFormRow(form, QT_TR_NOOP("Period"), m_period);
+        translatedFormRow(form, QT_TR_NOOP("Follow address"), m_source);
         viewLayout()->addLayout(form);
         m_ruleHint = description(QString(), view());
         m_ruleHint->setMinimumHeight(38);
@@ -213,9 +297,9 @@ public:
         m_error->setWordWrap(true);
         m_error->setTextColor(QColor(QStringLiteral("#b42318")), QColor(QStringLiteral("#ffb4ab")));
         viewLayout()->addWidget(m_error);
-        yesButton()->setText(tr("保存变量"));
+        bindTranslation(yesButton(), "text", QT_TR_NOOP("Save variable"));
         yesButton()->setObjectName(QStringLiteral("tagAcceptButton"));
-        cancelButton()->setText(tr("取消"));
+        bindTranslation(cancelButton(), "text", QT_TR_NOOP("Cancel"));
         cancelButton()->setObjectName(QStringLiteral("tagCancelButton"));
         connect(m_mode, &ComboBox::currentIndexChanged, this, [this] { updateRuleFields(); });
         updateRuleFields();
@@ -257,6 +341,20 @@ public:
     }
 
 protected:
+    void changeEvent(QEvent *event) override
+    {
+        Dialog::changeEvent(event);
+        if (event->type() != QEvent::LanguageChange || !m_mode) return;
+        retranslateBindings(this);
+        const QSignalBlocker blocker(m_mode);
+        for (int index = 0; index < m_mode->count(); ++index) {
+            const QString mode = m_mode->itemData(index).toString();
+            m_mode->setItemText(index, QStringLiteral("%1 · %2").arg(modeLabel(mode), mode));
+        }
+        updateRuleFields();
+        if (!m_error->text().isEmpty()) validate();
+    }
+
     bool validate() const override
     {
         QVariant parsed;
@@ -284,11 +382,11 @@ private:
         m_maximum->setEnabled(range);
         m_period->setEnabled(range || mode == QStringLiteral("toggle"));
         m_source->setEnabled(mode == QStringLiteral("follow"));
-        if (mode == QStringLiteral("manual")) m_ruleHint->setText(tr("手动：客户端或表格写入后保持数值，直至下次写入或重置。"));
-        else if (mode == QStringLiteral("sine")) m_ruleHint->setText(tr("正弦波：在最小值与最大值之间平滑变化，一个周期完成一次往返。"));
-        else if (mode == QStringLiteral("ramp")) m_ruleHint->setText(tr("斜坡：从最小值线性增加到最大值，周期结束后重新开始。"));
-        else if (mode == QStringLiteral("toggle")) m_ruleHint->setText(tr("周期翻转：仅用于 BOOL，每半个周期相对初始值翻转一次。"));
-        else m_ruleHint->setText(tr("跟随变量：每次更新时读取来源地址，将其当前值复制到此变量。"));
+        if (mode == QStringLiteral("manual")) bindTranslation(m_ruleHint, "text", QT_TR_NOOP("Manual: keep the value written by a client or the table until another write or reset."));
+        else if (mode == QStringLiteral("sine")) bindTranslation(m_ruleHint, "text", QT_TR_NOOP("Sine wave: move smoothly between the minimum and maximum over one complete period."));
+        else if (mode == QStringLiteral("ramp")) bindTranslation(m_ruleHint, "text", QT_TR_NOOP("Ramp: increase linearly from minimum to maximum, then start again each period."));
+        else if (mode == QStringLiteral("toggle")) bindTranslation(m_ruleHint, "text", QT_TR_NOOP("Toggle: BOOL only; invert the initial value every half period."));
+        else bindTranslation(m_ruleHint, "text", QT_TR_NOOP("Follow: copy the current value of the source address on each update."));
     }
 
     Project m_project;
@@ -317,15 +415,15 @@ MainWindow::MainWindow(QWidget *parent)
     setMinimumSize(940, 680);
     auto *themes = ThemeManager::instance();
     themes->setAccentColor(QColor(QStringLiteral("#099a91")));
-    const QString theme = QSettings().value(QStringLiteral("ui/theme"), QStringLiteral("Light")).toString();
-    themes->setTheme(theme == QStringLiteral("Dark") ? Theme::Dark : theme == QStringLiteral("Auto") ? Theme::Auto : Theme::Light);
+    const QString theme = QSettings().value(QStringLiteral("ui/theme"), QStringLiteral("Auto")).toString();
+    themes->setTheme(theme == QStringLiteral("Dark") ? Theme::Dark : theme == QStringLiteral("Light") ? Theme::Light : Theme::Auto);
     themes->applyTo(qApp);
 
     m_monitorPage = createMonitorPage();
-    addSubInterface(m_monitorPage, icon(FluentIcon::View), tr("变量监视"), QStringLiteral("monitorPage"));
-    addSubInterface(createRulesPage(), icon(FluentIcon::Code), tr("动态规则与指南"), QStringLiteral("rulesPage"));
-    addSubInterface(createLogsPage(), icon(FluentIcon::History), tr("服务日志"), QStringLiteral("logsPage"));
-    addSubInterface(createSettingsPage(), icon(FluentIcon::Setting), tr("设置"), QStringLiteral("settingsPage"), NavigationItemPosition::Bottom);
+    addSubInterface(m_monitorPage, icon(FluentIcon::View), tr("Variable monitor"), QStringLiteral("monitorPage"));
+    addSubInterface(createRulesPage(), icon(FluentIcon::Code), tr("Rules & guide"), QStringLiteral("rulesPage"));
+    addSubInterface(createLogsPage(), icon(FluentIcon::History), tr("Server log"), QStringLiteral("logsPage"));
+    addSubInterface(createSettingsPage(), icon(FluentIcon::Setting), tr("Settings"), QStringLiteral("settingsPage"), NavigationItemPosition::Bottom);
     createShortcuts();
 
     connect(m_server, &PlcServer::logMessage, this, &MainWindow::appendLog);
@@ -360,12 +458,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_refreshTimer, &QTimer::timeout, this, &MainWindow::refreshValues);
     m_refreshTimer->start();
     QString error;
-    if (!m_server->setProject(m_project, &error)) showError(tr("示例载入失败"), error);
+    if (!m_server->setProject(m_project, &error)) showError(tr("Could not load demo"), error);
     rebuildTable();
-    updateState();
-    updateTitle();
+    retranslateUi();
     switchTo(m_monitorPage);
-    appendLog(tr("已载入内置示例。服务当前停止，点击“启动服务”后才接受客户端连接。"));
+    appendLog(tr("The built-in demo is loaded. The server is stopped until you select Start server."));
 }
 
 MainWindow::~MainWindow()
@@ -380,22 +477,22 @@ QWidget *MainWindow::createMonitorPage()
 {
     QVBoxLayout *layout = nullptr;
     QWidget *page = scrollPage(QStringLiteral("monitorPage"), &layout);
-    pageHeading(layout, tr("变量监视"), tr("让上位机连接一台可读写的模拟 PLC，实时验证显示、控制和曲线。"));
+    pageHeading(layout, QT_TR_NOOP("Variable monitor"), QT_TR_NOOP("Connect your HMI to a readable and writable simulated PLC to test displays, controls and charts."));
 
     auto *projectTools = new QHBoxLayout;
     projectTools->setSpacing(8);
-    auto projectButton = [page, projectTools](const QString &text, const QString &name, FluentIcon symbol) {
-        auto *button = new PushButton(icon(symbol), text, page);
+    auto projectButton = [page, projectTools](const char *text, const QString &name, FluentIcon symbol) {
+        auto *button = translatedButton<PushButton>(icon(symbol), text, page);
         button->setObjectName(name);
         projectTools->addWidget(button);
         return button;
     };
-    m_newButton = projectButton(tr("新建"), QStringLiteral("newProjectButton"), FluentIcon::Add);
-    m_openButton = projectButton(tr("打开"), QStringLiteral("openProjectButton"), FluentIcon::Folder);
-    auto *save = projectButton(tr("保存"), QStringLiteral("saveProjectButton"), FluentIcon::Save);
-    auto *saveAs = projectButton(tr("另存为"), QStringLiteral("saveAsProjectButton"), FluentIcon::Document);
+    m_newButton = projectButton(QT_TR_NOOP("New"), QStringLiteral("newProjectButton"), FluentIcon::Add);
+    m_openButton = projectButton(QT_TR_NOOP("Open"), QStringLiteral("openProjectButton"), FluentIcon::Folder);
+    auto *save = projectButton(QT_TR_NOOP("Save"), QStringLiteral("saveProjectButton"), FluentIcon::Save);
+    auto *saveAs = projectButton(QT_TR_NOOP("Save as"), QStringLiteral("saveAsProjectButton"), FluentIcon::Document);
     projectTools->addStretch();
-    m_demoButton = projectButton(tr("载入示例"), QStringLiteral("demoProjectButton"), FluentIcon::Play);
+    m_demoButton = projectButton(QT_TR_NOOP("Load demo"), QStringLiteral("demoProjectButton"), FluentIcon::Play);
     layout->addLayout(projectTools);
     connect(m_newButton, &PushButton::clicked, this, &MainWindow::newProject);
     connect(m_openButton, &PushButton::clicked, this, &MainWindow::chooseProject);
@@ -411,7 +508,7 @@ QWidget *MainWindow::createMonitorPage()
     serviceCard->setObjectName(QStringLiteral("serverCard"));
     auto *service = cardLayout(serviceCard);
     auto *serviceHead = new QHBoxLayout;
-    serviceHead->addWidget(new StrongBodyLabel(tr("S7 服务"), serviceCard));
+    serviceHead->addWidget(translatedLabel<StrongBodyLabel>(QT_TR_NOOP("S7 server"), serviceCard));
     serviceHead->addStretch();
     m_stateLabel = new BodyLabel(serviceCard);
     m_stateLabel->setObjectName(QStringLiteral("serverStateLabel"));
@@ -421,7 +518,7 @@ QWidget *MainWindow::createMonitorPage()
     connection->setSpacing(12);
     auto *addressColumn = new QVBoxLayout;
     addressColumn->setSpacing(6);
-    addressColumn->addWidget(new CaptionLabel(tr("监听地址"), serviceCard));
+    addressColumn->addWidget(translatedLabel<CaptionLabel>(QT_TR_NOOP("Listen address"), serviceCard));
     m_addressEdit = new LineEdit(m_project.bindAddress, serviceCard);
     m_addressEdit->setObjectName(QStringLiteral("serverAddressEdit"));
     m_addressEdit->setPlaceholderText(QStringLiteral("127.0.0.1"));
@@ -429,7 +526,7 @@ QWidget *MainWindow::createMonitorPage()
     connection->addLayout(addressColumn, 1);
     auto *portColumn = new QVBoxLayout;
     portColumn->setSpacing(6);
-    portColumn->addWidget(new CaptionLabel(tr("TCP 端口"), serviceCard));
+    portColumn->addWidget(translatedLabel<CaptionLabel>(QT_TR_NOOP("TCP port"), serviceCard));
     m_portSpin = new SpinBox(serviceCard);
     m_portSpin->setObjectName(QStringLiteral("serverPortSpin"));
     m_portSpin->setRange(1, 65535);
@@ -437,15 +534,15 @@ QWidget *MainWindow::createMonitorPage()
     m_portSpin->setFixedWidth(130);
     portColumn->addWidget(m_portSpin);
     connection->addLayout(portColumn);
-    m_startButton = new PrimaryPushButton(icon(FluentIcon::Play), tr("启动服务"), serviceCard);
+    m_startButton = translatedButton<PrimaryPushButton>(icon(FluentIcon::Play), QT_TR_NOOP("Start server"), serviceCard);
     m_startButton->setObjectName(QStringLiteral("startServerButton"));
     connection->addWidget(m_startButton, 0, Qt::AlignBottom);
-    m_stopButton = new PushButton(icon(FluentIcon::Pause), tr("停止"), serviceCard);
+    m_stopButton = translatedButton<PushButton>(icon(FluentIcon::Pause), QT_TR_NOOP("Stop"), serviceCard);
     m_stopButton->setObjectName(QStringLiteral("stopServerButton"));
     connection->addWidget(m_stopButton, 0, Qt::AlignBottom);
     service->addLayout(connection);
     auto *connectionFoot = new QHBoxLayout;
-    connectionFoot->addWidget(description(tr("默认只接受本机连接 · S7comm · 无需连接真实 PLC"), serviceCard), 1);
+    connectionFoot->addWidget(description(QT_TR_NOOP("Local connections by default · S7comm · No physical PLC required"), serviceCard), 1);
     m_clientLabel = new BodyLabel(serviceCard);
     m_clientLabel->setObjectName(QStringLiteral("clientCountLabel"));
     connectionFoot->addWidget(m_clientLabel);
@@ -467,27 +564,27 @@ QWidget *MainWindow::createMonitorPage()
     auto *tags = cardLayout(tagsCard);
     auto *tagTools = new QHBoxLayout;
     tagTools->setSpacing(8);
-    tagTools->addWidget(new StrongBodyLabel(tr("模拟变量"), tagsCard));
+    tagTools->addWidget(translatedLabel<StrongBodyLabel>(QT_TR_NOOP("Variables"), tagsCard));
     m_tagCountLabel = description(QString(), tagsCard);
     m_tagCountLabel->setObjectName(QStringLiteral("tagCountLabel"));
     tagTools->addWidget(m_tagCountLabel);
     tagTools->addStretch();
-    auto tagButton = [tagsCard, tagTools](const QString &text, const QString &name, FluentIcon symbol) {
-        auto *button = new PushButton(icon(symbol), text, tagsCard);
+    auto tagButton = [tagsCard, tagTools](const char *text, const QString &name, FluentIcon symbol) {
+        auto *button = translatedButton<PushButton>(icon(symbol), text, tagsCard);
         button->setObjectName(name);
         tagTools->addWidget(button);
         return button;
     };
-    m_addButton = tagButton(tr("新增"), QStringLiteral("addTagButton"), FluentIcon::Add);
-    m_editButton = tagButton(tr("编辑"), QStringLiteral("editTagButton"), FluentIcon::Edit);
-    m_deleteButton = tagButton(tr("删除"), QStringLiteral("deleteTagButton"), FluentIcon::Delete);
-    m_resetButton = tagButton(tr("重置值"), QStringLiteral("resetValuesButton"), FluentIcon::History);
+    m_addButton = tagButton(QT_TR_NOOP("Add"), QStringLiteral("addTagButton"), FluentIcon::Add);
+    m_editButton = tagButton(QT_TR_NOOP("Edit"), QStringLiteral("editTagButton"), FluentIcon::Edit);
+    m_deleteButton = tagButton(QT_TR_NOOP("Delete"), QStringLiteral("deleteTagButton"), FluentIcon::Delete);
+    m_resetButton = tagButton(QT_TR_NOOP("Reset values"), QStringLiteral("resetValuesButton"), FluentIcon::History);
     tags->addLayout(tagTools);
-    tags->addWidget(description(tr("双击“当前值”可临时写入。初始值与动态规则在“编辑”中设置；运行时请先停止再修改结构。"), tagsCard));
+    tags->addWidget(description(QT_TR_NOOP("Double-click a current value to write it temporarily. Use Edit for initial values and rules; stop the server to change the project structure."), tagsCard));
     m_table = new TableWidget(tagsCard);
     m_table->setObjectName(QStringLiteral("tagTable"));
     m_table->setColumnCount(5);
-    m_table->setHorizontalHeaderLabels({tr("变量名称"), tr("S7 地址"), tr("类型"), tr("当前值"), tr("动态规则")});
+    m_table->setHorizontalHeaderLabels({tr("Variable name"), tr("S7 address"), tr("Type"), tr("Current value"), tr("Rule")});
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
@@ -521,9 +618,9 @@ QWidget *MainWindow::createMonitorPage()
         QString error;
         if (!parseValue(m_project.tags.at(row).dataType, item->text(), &value, &error)
             || !m_server->setValue(row, value, &error)) {
-            showError(tr("数值写入失败"), error);
+            showError(tr("Could not write value"), error);
         } else {
-            appendLog(tr("本地写入 %1 = %2").arg(m_project.tags.at(row).address, valueText(value, m_project.tags.at(row).dataType)));
+            appendLog(tr("Local write %1 = %2").arg(m_project.tags.at(row).address, valueText(value, m_project.tags.at(row).dataType)));
         }
         const QSignalBlocker blocker(m_table);
         item->setText(valueText(m_server->value(row), m_project.tags.at(row).dataType));
@@ -535,27 +632,27 @@ QWidget *MainWindow::createRulesPage()
 {
     QVBoxLayout *layout = nullptr;
     QWidget *page = scrollPage(QStringLiteral("rulesPage"), &layout);
-    pageHeading(layout, tr("动态规则与使用指南"), tr("从一个能读写的 S7 地址开始，在没有硬件的环境中验证上位机行为。"));
-    const QList<QPair<QString, QString>> rules = {
-        {tr("手动 · manual"), tr("由客户端或变量表写入，保留当前值。适合按钮命令、设定值和手动故障注入。")},
-        {tr("正弦波 · sine"), tr("在最小值与最大值之间平滑往返。适合温度、压力、液位与实时曲线测试。")},
-        {tr("斜坡 · ramp"), tr("从最小值线性升到最大值，再从头开始。适合量程、阈值和动画测试。")},
-        {tr("周期翻转 · toggle"), tr("仅用于 BOOL，每半个周期相对初始值翻转一次，可模拟心跳或运行状态。")},
-        {tr("跟随变量 · follow"), tr("复制来源地址的当前值。内置示例用它将启动命令映射为运行反馈。")}
+    pageHeading(layout, QT_TR_NOOP("Rules and connection guide"), QT_TR_NOOP("Start with a readable and writable S7 address, then test your HMI without hardware."));
+    const QList<QPair<const char *, const char *>> rules = {
+        {QT_TR_NOOP("Manual · manual"), QT_TR_NOOP("Keep the value written by a client or the table. Use it for commands, setpoints and manual fault injection.")},
+        {QT_TR_NOOP("Sine wave · sine"), QT_TR_NOOP("Move smoothly between minimum and maximum. Use it for temperature, pressure, level and chart tests.")},
+        {QT_TR_NOOP("Ramp · ramp"), QT_TR_NOOP("Increase linearly from minimum to maximum, then start again. Use it for range, threshold and animation tests.")},
+        {QT_TR_NOOP("Toggle · toggle"), QT_TR_NOOP("BOOL only: invert the initial value every half period to simulate a heartbeat or running state.")},
+        {QT_TR_NOOP("Follow · follow"), QT_TR_NOOP("Copy the current value of a source address. The demo maps a start command to running feedback.")}
     };
     for (const auto &rule : rules) {
         auto *card = new CardWidget(page);
         auto *body = cardLayout(card);
-        body->addWidget(new StrongBodyLabel(rule.first, card));
+        body->addWidget(translatedLabel<StrongBodyLabel>(rule.first, card));
         body->addWidget(description(rule.second, card));
         layout->addWidget(card);
     }
     auto *guide = new CardWidget(page);
     auto *body = cardLayout(guide);
-    body->addWidget(new SubtitleLabel(tr("三步连接"), guide));
-    body->addWidget(description(tr("1. 在“变量监视”载入示例并启动服务。\n2. 在上位机中选择经典 S7comm，地址 127.0.0.1，端口 1102，机架 0、插槽 1。\n3. 使用表格中的地址与类型读取温度和压力，写入启动命令并观察运行反馈。"), guide));
-    body->addWidget(description(tr("1102 是开发测试端口，客户端需支持自定义端口。若客户端固定使用 102，可停止服务后改为 102；操作系统可能要求相应权限。跨电脑连接时，将监听地址改为本机局域网 IP。"), guide));
-    body->addWidget(description(tr("本工具提供 S7 读写内存和简单动态规则，不运行西门子梯形图或真实 PLC 程序，也不提供 S7CommPlus。"), guide));
+    body->addWidget(translatedLabel<SubtitleLabel>(QT_TR_NOOP("Connect in three steps"), guide));
+    body->addWidget(description(QT_TR_NOOP("1. Load the demo in Variable monitor and start the server.\n2. Select classic S7comm in your HMI: 127.0.0.1, port 1102, rack 0 and slot 1.\n3. Read temperature and pressure using the listed addresses and types, then write the start command and observe feedback."), guide));
+    body->addWidget(description(QT_TR_NOOP("Port 1102 is intended for development; the client must support a custom port. If your client requires port 102, stop the server and change the port; your OS may require permission. To connect from another computer, listen on this computer's LAN IP address."), guide));
+    body->addWidget(description(QT_TR_NOOP("This tool provides S7 memory access and simple rules. It does not run Siemens ladder logic or PLC programs and does not provide S7CommPlus."), guide));
     layout->addWidget(guide);
     layout->addStretch();
     return page;
@@ -565,10 +662,10 @@ QWidget *MainWindow::createLogsPage()
 {
     QVBoxLayout *layout = nullptr;
     QWidget *page = scrollPage(QStringLiteral("logsPage"), &layout);
-    pageHeading(layout, tr("服务日志"), tr("查看服务启动、客户端连接与数值操作。保留最近 2,000 行。"));
+    pageHeading(layout, QT_TR_NOOP("Server log"), QT_TR_NOOP("View server events, client connections and value operations. The most recent 2,000 lines are kept."));
     auto *tools = new QHBoxLayout;
     tools->addStretch();
-    auto *clear = new PushButton(icon(FluentIcon::Delete), tr("清空日志"), page);
+    auto *clear = translatedButton<PushButton>(icon(FluentIcon::Delete), QT_TR_NOOP("Clear log"), page);
     clear->setObjectName(QStringLiteral("clearLogButton"));
     tools->addWidget(clear);
     layout->addLayout(tools);
@@ -588,10 +685,10 @@ QWidget *MainWindow::createSettingsPage()
 {
     QVBoxLayout *layout = nullptr;
     QWidget *page = scrollPage(QStringLiteral("settingsPage"), &layout);
-    pageHeading(layout, tr("设置"), tr("工程参数随项目保存，外观设置仅保存在这台电脑。"));
+    pageHeading(layout, QT_TR_NOOP("Settings"), QT_TR_NOOP("Project parameters are saved with the project. Appearance and language preferences are saved on this computer."));
     auto *projectCard = new CardWidget(page);
     auto *projectLayout = cardLayout(projectCard);
-    projectLayout->addWidget(new SubtitleLabel(tr("当前工程"), projectCard));
+    projectLayout->addWidget(translatedLabel<SubtitleLabel>(QT_TR_NOOP("Current project"), projectCard));
     auto *form = new QFormLayout;
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     form->setVerticalSpacing(14);
@@ -602,11 +699,11 @@ QWidget *MainWindow::createSettingsPage()
     m_memorySpin->setRange(1, 65535);
     m_memorySpin->setSingleStep(256);
     m_memorySpin->setValue(m_project.memorySize);
-    m_memorySpin->setSuffix(tr(" 字节"));
-    form->addRow(tr("工程名称"), m_projectNameEdit);
-    form->addRow(tr("每个 DB / 区域容量"), m_memorySpin);
+    bindTranslation(m_memorySpin, "suffix", QT_TR_NOOP(" bytes"));
+    translatedFormRow(form, QT_TR_NOOP("Project name"), m_projectNameEdit);
+    translatedFormRow(form, QT_TR_NOOP("Bytes per DB / area"), m_memorySpin);
     projectLayout->addLayout(form);
-    projectLayout->addWidget(description(tr("容量需覆盖全部变量地址。修改后将在下一次启动或重置时装载；运行时不可修改。"), projectCard));
+    projectLayout->addWidget(description(QT_TR_NOOP("Memory must cover every variable address. Changes apply on the next start or reset and are locked while running."), projectCard));
     layout->addWidget(projectCard);
     connect(m_projectNameEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
         m_project.name = text.trimmed();
@@ -617,31 +714,103 @@ QWidget *MainWindow::createSettingsPage()
         setDirty();
     });
     auto *appearance = new CardWidget(page);
+    appearance->setObjectName(QStringLiteral("appearanceCard"));
     auto *appearanceLayout = cardLayout(appearance);
-    appearanceLayout->addWidget(new SubtitleLabel(tr("外观"), appearance));
+    appearanceLayout->addWidget(translatedLabel<SubtitleLabel>(QT_TR_NOOP("Appearance"), appearance));
     auto *themeRow = new QHBoxLayout;
-    themeRow->addWidget(new BodyLabel(tr("应用主题"), appearance));
+    themeRow->addWidget(translatedLabel<BodyLabel>(QT_TR_NOOP("App theme"), appearance));
     themeRow->addStretch();
     m_themeCombo = new ComboBox(appearance);
     m_themeCombo->setObjectName(QStringLiteral("themeCombo"));
-    m_themeCombo->addItem(tr("浅色"), {}, QStringLiteral("Light"));
-    m_themeCombo->addItem(tr("深色"), {}, QStringLiteral("Dark"));
-    m_themeCombo->addItem(tr("跟随系统"), {}, QStringLiteral("Auto"));
-    m_themeCombo->setCurrentIndex(ThemeManager::instance()->theme() == Theme::Dark ? 1 : ThemeManager::instance()->theme() == Theme::Auto ? 2 : 0);
+    translatedComboItem(m_themeCombo, QT_TR_NOOP("Follow system"), QStringLiteral("Auto"));
+    translatedComboItem(m_themeCombo, QT_TR_NOOP("Light"), QStringLiteral("Light"));
+    translatedComboItem(m_themeCombo, QT_TR_NOOP("Dark"), QStringLiteral("Dark"));
+    m_themeCombo->setCurrentIndex(m_themeCombo->findData(ThemeManager::instance()->theme() == Theme::Dark ? QStringLiteral("Dark") : ThemeManager::instance()->theme() == Theme::Light ? QStringLiteral("Light") : QStringLiteral("Auto")));
     m_themeCombo->setMinimumWidth(170);
     themeRow->addWidget(m_themeCombo);
     appearanceLayout->addLayout(themeRow);
-    appearanceLayout->addWidget(description(tr("青绿色强调色 · Fluent 桌面控件"), appearance));
+    auto *languageRow = new QHBoxLayout;
+    languageRow->addWidget(translatedLabel<BodyLabel>(QT_TR_NOOP("Language"), appearance));
+    languageRow->addStretch();
+    m_languageCombo = new ComboBox(appearance);
+    m_languageCombo->setObjectName(QStringLiteral("languageCombo"));
+    translatedComboItem(m_languageCombo, QT_TR_NOOP("Follow system"), QStringLiteral("Auto"));
+    m_languageCombo->addItem(QStringLiteral("English"), {}, QStringLiteral("en_US"));
+    m_languageCombo->addItem(QStringLiteral("简体中文"), {}, QStringLiteral("zh_CN"));
+    m_languageCombo->setCurrentIndex(m_languageCombo->findData(I18n::setting()));
+    m_languageCombo->setMinimumWidth(170);
+    languageRow->addWidget(m_languageCombo);
+    appearanceLayout->addLayout(languageRow);
+    appearanceLayout->addWidget(description(QT_TR_NOOP("Language changes apply immediately and are remembered for the next launch."), appearance));
+    appearanceLayout->addWidget(description(QT_TR_NOOP("Teal accent · Fluent desktop controls"), appearance));
     layout->addWidget(appearance);
-    connect(m_themeCombo, &ComboBox::currentIndexChanged, this, [this](int index) {
-        ThemeManager::instance()->setTheme(index == 1 ? Theme::Dark : index == 2 ? Theme::Auto : Theme::Light);
-        QSettings().setValue(QStringLiteral("ui/theme"), m_themeCombo->currentData().toString());
+    connect(m_themeCombo, &ComboBox::currentIndexChanged, this, [this](int) {
+        const QString setting = m_themeCombo->currentData().toString();
+        ThemeManager::instance()->setTheme(setting == QStringLiteral("Dark") ? Theme::Dark : setting == QStringLiteral("Light") ? Theme::Light : Theme::Auto);
+        QSettings().setValue(QStringLiteral("ui/theme"), setting);
     });
-    auto *about = new CardWidget(page);
-    auto *aboutLayout = cardLayout(about);
-    aboutLayout->addWidget(new StrongBodyLabel(tr("FluentPLC Simulator"), about));
-    aboutLayout->addWidget(description(tr("独立桌面 S7 模拟器。默认载入示例并保持服务停止，仅在你启动后监听连接。"), about));
-    layout->addWidget(about);
+    connect(m_languageCombo, &ComboBox::currentIndexChanged, this, [this](int) {
+        if (!I18n::setLanguage(m_languageCombo->currentData().toString())) {
+            const QSignalBlocker blocker(m_languageCombo);
+            m_languageCombo->setCurrentIndex(m_languageCombo->findData(I18n::setting()));
+        }
+    });
+    auto *repository = new CardWidget(page);
+    repository->setObjectName(QStringLiteral("repositoryCard"));
+    auto *repositoryLayout = cardLayout(repository);
+    auto *repositoryTitle = translatedLabel<SubtitleLabel>(QT_TR_NOOP("Repository"), repository);
+    repositoryTitle->setObjectName(QStringLiteral("repositoryTitleLabel"));
+    repositoryLayout->addWidget(repositoryTitle);
+    auto *projectName = translatedLabel<StrongBodyLabel>(QT_TR_NOOP("FluentPLC Simulator"), repository);
+    projectName->setObjectName(QStringLiteral("repositoryNameLabel"));
+    repositoryLayout->addWidget(projectName);
+    repositoryLayout->addWidget(description(QT_TR_NOOP("Classic S7comm server for testing HMI and S7 clients without physical PLC hardware."), repository));
+
+    auto *metadata = new QHBoxLayout;
+    metadata->setSpacing(12);
+    metadata->addWidget(translatedLabel<CaptionLabel>(QT_TR_NOOP("Version"), repository));
+    const QString version = QCoreApplication::applicationVersion();
+    auto *versionLabel = version.isEmpty() ? translatedLabel<BodyLabel>(QT_TR_NOOP("Development build"), repository)
+                                          : new BodyLabel(version, repository);
+    versionLabel->setObjectName(QStringLiteral("repositoryVersionLabel"));
+    metadata->addWidget(versionLabel);
+    metadata->addSpacing(12);
+    metadata->addWidget(translatedLabel<CaptionLabel>(QT_TR_NOOP("License"), repository));
+    auto *license = new BodyLabel(QStringLiteral("GPL-3.0"), repository);
+    license->setObjectName(QStringLiteral("repositoryLicenseLabel"));
+    metadata->addWidget(license);
+    metadata->addStretch();
+    repositoryLayout->addLayout(metadata);
+
+    const QUrl repositoryUrl(QStringLiteral("https://github.com/txp666/FluentPLC-Simulator"));
+    auto *repositoryLink = new HyperlinkLabel(repositoryUrl, QStringLiteral("github.com/txp666/FluentPLC-Simulator"), repository);
+    repositoryLink->setObjectName(QStringLiteral("repositoryLink"));
+    repositoryLink->setToolTip(repositoryUrl.toString());
+    repositoryLayout->addWidget(repositoryLink, 0, Qt::AlignLeft);
+    auto externalButton = [this, repository](const char *source, const QString &name, const QUrl &url) {
+        auto *button = translatedButton<PushButton>(icon(FluentIcon::Document), source, repository);
+        button->setObjectName(name);
+        button->setProperty("externalUrl", url);
+        button->setToolTip(url.toString());
+        connect(button, &PushButton::clicked, this, [url] { QDesktopServices::openUrl(url); });
+        return button;
+    };
+    auto *actions = new FlowLayout(0, 8, 8);
+    actions->addWidget(externalButton(QT_TR_NOOP("Repository"), QStringLiteral("repositoryButton"), repositoryUrl));
+    actions->addWidget(externalButton(QT_TR_NOOP("Report issue"), QStringLiteral("reportIssueButton"), QUrl(QStringLiteral("https://github.com/txp666/FluentPLC-Simulator/issues/new"))));
+    actions->addWidget(externalButton(QT_TR_NOOP("Releases"), QStringLiteral("releasesButton"), QUrl(QStringLiteral("https://github.com/txp666/FluentPLC-Simulator/releases"))));
+    repositoryLayout->addLayout(actions);
+
+    auto *relatedTitle = translatedLabel<StrongBodyLabel>(QT_TR_NOOP("Related projects"), repository);
+    relatedTitle->setObjectName(QStringLiteral("relatedProjectsLabel"));
+    repositoryLayout->addWidget(relatedTitle);
+    repositoryLayout->addWidget(description(QT_TR_NOOP("Explore the related HMI designers and browser tools."), repository));
+    auto *related = new FlowLayout(0, 8, 8);
+    related->addWidget(externalButton(QT_TR_NOOP("FluentHMI Studio"), QStringLiteral("relatedHmiButton"), QUrl(QStringLiteral("https://github.com/txp666/FluentHMI-Studio"))));
+    related->addWidget(externalButton(QT_TR_NOOP("PyQt UI Designer"), QStringLiteral("relatedPythonButton"), QUrl(QStringLiteral("https://github.com/txp666/PyQt-UI-Designer"))));
+    related->addWidget(externalButton(QT_TR_NOOP("modusignal"), QStringLiteral("relatedWebButton"), QUrl(QStringLiteral("https://github.com/txp666/modusignal"))));
+    repositoryLayout->addLayout(related);
+    layout->addWidget(repository);
     layout->addStretch();
     return page;
 }
@@ -660,11 +829,52 @@ void MainWindow::createShortcuts()
     add(QKeySequence::SaveAs, [this] { saveProjectAs(); });
 }
 
+void MainWindow::retranslateUi()
+{
+    // Translate existing widgets in place. Never reload a project or touch a PLC
+    // connection, a running generator clock, table editors or user-entered names.
+    retranslateBindings(this);
+    const QList<QPair<QString, QString>> navigation = {
+        {QStringLiteral("monitorPage"), tr("Variable monitor")},
+        {QStringLiteral("rulesPage"), tr("Rules & guide")},
+        {QStringLiteral("logsPage"), tr("Server log")},
+        {QStringLiteral("settingsPage"), tr("Settings")},
+    };
+    for (const auto &item : navigation) {
+        if (auto *widget = qobject_cast<NavigationTreeWidget *>(navigationInterface()->widget(item.first))) widget->setText(item.second);
+    }
+    const QSignalBlocker tableBlocker(m_table);
+    bool editingValue = false;
+    for (auto *editor : m_table->findChildren<QLineEdit *>()) editingValue = editingValue || editor->isVisible();
+    m_table->setHorizontalHeaderLabels({tr("Variable name"), tr("S7 address"), tr("Type"), tr("Current value"), tr("Rule")});
+    for (int row = 0; row < m_project.tags.size(); ++row) {
+        const Tag &tag = m_project.tags.at(row);
+        if (auto *rule = m_table->item(row, 4)) {
+            rule->setText(modeLabel(tag.mode));
+            rule->setToolTip(tag.mode == QStringLiteral("follow") ? tr("Follow %1").arg(tag.source) : tag.mode);
+        }
+        if (!editingValue) {
+            if (auto *value = m_table->item(row, 3)) value->setToolTip(tr("Double-click to write a temporary value; initial value: %1").arg(valueText(tag.initialValue, tag.dataType)));
+        }
+    }
+    m_tagCountLabel->setText(tr("%1 variables").arg(m_project.tags.size()));
+    const QSignalBlocker languageBlocker(m_languageCombo);
+    m_languageCombo->setCurrentIndex(m_languageCombo->findData(I18n::setting()));
+    updateState();
+    updateTitle();
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    FluentWindow::changeEvent(event);
+    if (event->type() == QEvent::LanguageChange && m_table && m_languageCombo && m_stateLabel) retranslateUi();
+}
+
 bool MainWindow::applyProject(const Project &project, const QString &path, bool dirty)
 {
     QString error;
     if (!project.validate(&error) || !m_server->setProject(project, &error)) {
-        showError(tr("无法装载工程"), error);
+        showError(tr("Could not load project"), error);
         return false;
     }
     m_project = m_server->project();
@@ -688,19 +898,19 @@ bool MainWindow::applyProject(const Project &project, const QString &path, bool 
 bool MainWindow::openProject(const QString &path)
 {
     if (m_server->isRunning()) {
-        showError(tr("服务正在运行"), tr("请先停止服务，再打开其他工程。"));
+        showError(tr("Server is running"), tr("Stop the server before opening another project."));
         return false;
     }
     Project loaded;
     QString error;
     if (!Project::load(path, &loaded, &error)) {
-        showError(tr("打开失败"), error);
+        showError(tr("Could not open project"), error);
         return false;
     }
     if (!confirmSaveChanges()) return false;
     if (!applyProject(loaded, QFileInfo(path).absoluteFilePath(), false)) return false;
-    appendLog(tr("已打开工程：%1").arg(path));
-    showSuccess(tr("工程已打开"), loaded.name);
+    appendLog(tr("Opened project: %1").arg(path));
+    showSuccess(tr("Project opened"), loaded.name);
     return true;
 }
 
@@ -709,26 +919,28 @@ bool MainWindow::saveProject(const QString &path)
     if (path.trimmed().isEmpty()) return false;
     QString error;
     if (!m_project.validate(&error) || !m_project.save(path, &error)) {
-        showError(tr("保存失败"), error);
+        showError(tr("Could not save project"), error);
         return false;
     }
     m_projectPath = QFileInfo(path).absoluteFilePath();
     setDirty(false);
-    appendLog(tr("已保存工程：%1").arg(m_projectPath));
-    showSuccess(tr("工程已保存"), tr("已保存变量配置与初始值，临时运行数值不写入工程。"));
+    appendLog(tr("Saved project: %1").arg(m_projectPath));
+    showSuccess(tr("Project saved"), tr("Variable definitions and initial values were saved. Temporary runtime values are not written to the project."));
     return true;
 }
 
 bool MainWindow::confirmSaveChanges()
 {
     if (!m_dirty) return true;
-    QMessageBox box(QMessageBox::Question, tr("保存工程更改"), tr("“%1”有未保存的更改。是否保存后继续？").arg(m_project.name),
+    QMessageBox box(QMessageBox::Question, tr("Save project changes"), tr("Save changes to \"%1\" before continuing?").arg(m_project.name),
                     QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, this);
     box.setObjectName(QStringLiteral("unsavedChangesDialog"));
+    bindTranslation(&box, "windowTitle", QT_TR_NOOP("Save project changes"));
+    bindTranslation(&box, "text", QT_TR_NOOP("Save changes to \"%1\" before continuing?"), {m_project.name});
     box.setDefaultButton(QMessageBox::Save);
-    box.button(QMessageBox::Save)->setText(tr("保存"));
-    box.button(QMessageBox::Discard)->setText(tr("放弃更改"));
-    box.button(QMessageBox::Cancel)->setText(tr("取消"));
+    bindTranslation(box.button(QMessageBox::Save), "text", QT_TR_NOOP("Save"));
+    bindTranslation(box.button(QMessageBox::Discard), "text", QT_TR_NOOP("Discard changes"));
+    bindTranslation(box.button(QMessageBox::Cancel), "text", QT_TR_NOOP("Cancel"));
     const int result = box.exec();
     return result == QMessageBox::Discard || (result == QMessageBox::Save && saveCurrentProject());
 }
@@ -740,9 +952,9 @@ bool MainWindow::saveCurrentProject()
 
 bool MainWindow::saveProjectAs()
 {
-    QString path = QFileDialog::getSaveFileName(this, tr("保存 FluentPLC 工程"),
+    QString path = QFileDialog::getSaveFileName(this, tr("Save FluentPLC project"),
                     m_projectPath.isEmpty() ? m_project.name + QStringLiteral(".plcsim.json") : m_projectPath,
-                    tr("FluentPLC 工程 (*.plcsim.json);;JSON 文件 (*.json);;所有文件 (*)"));
+                    tr("FluentPLC project (*.plcsim.json);;JSON files (*.json);;All files (*)"));
     if (path.isEmpty()) return false;
     if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".plcsim.json");
     return saveProject(path);
@@ -751,8 +963,8 @@ bool MainWindow::saveProjectAs()
 void MainWindow::chooseProject()
 {
     if (m_server->isRunning()) return;
-    const QString path = QFileDialog::getOpenFileName(this, tr("打开 FluentPLC 工程"), m_projectPath,
-                    tr("FluentPLC 工程 (*.plcsim.json *.json);;所有文件 (*)"));
+    const QString path = QFileDialog::getOpenFileName(this, tr("Open FluentPLC project"), m_projectPath,
+                    tr("FluentPLC project (*.plcsim.json *.json);;All files (*)"));
     if (!path.isEmpty()) openProject(path);
 }
 
@@ -760,16 +972,16 @@ void MainWindow::newProject()
 {
     if (m_server->isRunning() || !confirmSaveChanges()) return;
     Project project;
-    project.name = tr("新建 S7 测试台");
-    if (applyProject(project, {}, true)) appendLog(tr("已新建工程。添加变量后启动服务。"));
+    project.name = tr("New S7 test bench");
+    if (applyProject(project, {}, true)) appendLog(tr("Created a project. Add variables, then start the server."));
 }
 
 void MainWindow::loadDemo()
 {
     if (m_server->isRunning() || !confirmSaveChanges()) return;
     if (applyProject(Project::demo(), {}, false)) {
-        appendLog(tr("已载入温度、压力与启动反馈示例。"));
-        showSuccess(tr("示例已就绪"), tr("点击“启动服务”后，即可从上位机连接。"));
+        appendLog(tr("Loaded the temperature, pressure and start-feedback demo."));
+        showSuccess(tr("Demo ready"), tr("Select Start server, then connect from your HMI."));
     }
 }
 
@@ -797,11 +1009,13 @@ void MainWindow::deleteTag()
     const int row = m_table->currentRow();
     if (m_server->isRunning() || row < 0 || row >= m_project.tags.size()) return;
     const Tag tag = m_project.tags.at(row);
-    Dialog confirm(tr("删除变量"), tr("确定删除“%1”（%2）？引用它的跟随规则需要先修改。 ").arg(tag.name, tag.address), this);
+    Dialog confirm(tr("Delete variable"), tr("Delete \"%1\" (%2)? Update any rules that follow this address first.").arg(tag.name, tag.address), this);
     confirm.setObjectName(QStringLiteral("deleteTagDialog"));
-    confirm.yesButton()->setText(tr("删除"));
+    bindTranslation(confirm.titleLabel(), "text", QT_TR_NOOP("Delete variable"));
+    bindTranslation(confirm.contentLabel(), "text", QT_TR_NOOP("Delete \"%1\" (%2)? Update any rules that follow this address first."), {tag.name, tag.address});
+    bindTranslation(confirm.yesButton(), "text", QT_TR_NOOP("Delete"));
     confirm.yesButton()->setObjectName(QStringLiteral("confirmDeleteTagButton"));
-    confirm.cancelButton()->setText(tr("取消"));
+    bindTranslation(confirm.cancelButton(), "text", QT_TR_NOOP("Cancel"));
     if (confirm.exec() != QDialog::Accepted) return;
     Project next = m_project;
     next.tags.removeAt(row);
@@ -824,12 +1038,12 @@ void MainWindow::rebuildTable()
             if (column == 3) flags |= Qt::ItemIsEditable;
             item->setFlags(flags);
             if (column == 1 || column == 3) item->setFont(mono);
-            if (column == 3) item->setToolTip(tr("双击写入临时值；初始值为 %1").arg(valueText(tag.initialValue, tag.dataType)));
-            if (column == 4) item->setToolTip(tag.mode == QStringLiteral("follow") ? tr("跟随 %1").arg(tag.source) : tag.mode);
+            if (column == 3) item->setToolTip(tr("Double-click to write a temporary value; initial value: %1").arg(valueText(tag.initialValue, tag.dataType)));
+            if (column == 4) item->setToolTip(tag.mode == QStringLiteral("follow") ? tr("Follow %1").arg(tag.source) : tag.mode);
             m_table->setItem(row, column, item);
         }
     }
-    m_tagCountLabel->setText(tr("%1 个变量").arg(m_project.tags.size()));
+    m_tagCountLabel->setText(tr("%1 variables").arg(m_project.tags.size()));
     m_refreshing = false;
 }
 
@@ -841,8 +1055,13 @@ void MainWindow::refreshValues()
     const QSignalBlocker blocker(m_table);
     m_refreshing = true;
     for (int row = 0; row < m_project.tags.size(); ++row) {
-        const QString text = valueText(m_server->value(row), m_project.tags.at(row).dataType);
-        if (auto *item = m_table->item(row, 3); item && item->text() != text) item->setText(text);
+        const Tag &tag = m_project.tags.at(row);
+        const QString text = valueText(m_server->value(row), tag.dataType);
+        if (auto *item = m_table->item(row, 3)) {
+            if (item->text() != text) item->setText(text);
+            const QString tooltip = tr("Double-click to write a temporary value; initial value: %1").arg(valueText(tag.initialValue, tag.dataType));
+            if (item->toolTip() != tooltip) item->setToolTip(tooltip);
+        }
     }
     m_refreshing = false;
 }
@@ -864,10 +1083,10 @@ void MainWindow::updateState()
     const bool selected = m_table->currentRow() >= 0 && m_table->currentRow() < m_project.tags.size();
     m_editButton->setEnabled(!running && selected);
     m_deleteButton->setEnabled(!running && selected);
-    m_stateLabel->setText(running ? tr("● 运行中") : tr("● 已停止"));
+    m_stateLabel->setText(running ? tr("● Running") : tr("● Stopped"));
     m_stateLabel->setTextColor(running ? QColor(QStringLiteral("#087e74")) : QColor(QStringLiteral("#687780")),
                              running ? QColor(QStringLiteral("#55d6bd")) : QColor(QStringLiteral("#a6b6bf")));
-    m_clientLabel->setText(tr("客户端 %1").arg(m_server->clientCount()));
+    m_clientLabel->setText(tr("Clients %1").arg(m_server->clientCount()));
 }
 
 void MainWindow::updateTitle()
@@ -877,8 +1096,8 @@ void MainWindow::updateTitle()
     setWindowTitle(QStringLiteral("%1%2 — FluentPLC Simulator")
                        .arg(m_project.name, m_dirty ? QStringLiteral(" *") : QString()));
     setWindowModified(m_dirty);
-    const QString file = m_projectPath.isEmpty() ? tr("尚未保存为文件") : m_projectPath;
-    m_projectLabel->setText(QStringLiteral("%1  ·  %2%3").arg(m_project.name, file, m_dirty ? tr("  ·  未保存") : QString()));
+    const QString file = m_projectPath.isEmpty() ? tr("Not saved to a file") : m_projectPath;
+    m_projectLabel->setText(QStringLiteral("%1  ·  %2%3").arg(m_project.name, file, m_dirty ? tr("  ·  Unsaved") : QString()));
 }
 
 void MainWindow::setDirty(bool dirty)
@@ -898,7 +1117,7 @@ void MainWindow::startServer()
     bool same = loaded.name == m_project.name && loaded.bindAddress == m_project.bindAddress
         && loaded.port == m_project.port && loaded.memorySize == m_project.memorySize;
     if (!m_project.validate(&error) || (!same && !m_server->setProject(m_project, &error)) || !m_server->start(&error)) {
-        showError(tr("服务启动失败"), error);
+        showError(tr("Could not start server"), error);
     }
     updateState();
 }
@@ -916,19 +1135,19 @@ void MainWindow::resetValues()
     if (m_server->isRunning()) return;
     QString error;
     if (!m_server->setProject(m_project, &error)) {
-        showError(tr("重置失败"), error);
+        showError(tr("Could not reset values"), error);
         return;
     }
     m_elapsedSeconds = 0;
     refreshValues();
-    appendLog(tr("所有变量已恢复为工程初始值。"));
-    showSuccess(tr("数值已重置"), tr("已恢复工程初始值。"));
+    appendLog(tr("All variables were reset to the project initial values."));
+    showSuccess(tr("Values reset"), tr("Project initial values restored."));
 }
 
 void MainWindow::showError(const QString &title, const QString &message)
 {
     InfoBar::error(title, message, Qt::Horizontal, true, 5500, InfoBarPosition::TopRight, this);
-    appendLog(tr("错误 · %1：%2").arg(title, message));
+    appendLog(tr("Error · %1: %2").arg(title, message));
 }
 
 void MainWindow::showSuccess(const QString &title, const QString &message)

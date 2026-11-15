@@ -80,3 +80,7 @@ Release 构建及 Windows/Linux 运行状态仍待验证。CI 配置不等同于
 ### macOS Release 构建
 
 在本机 Apple Silicon 上完成 Release 全量构建。优化构建的 CTest 三组全部通过（simulator / ui / native_sigpipe，7.79 秒），最终窗口标题调整后只重跑受影响的 UI 组并通过。已检查 Release 原生窗口截图；便携应用的生成命令为 `python3 scripts/package_macos.py --build-dir build/release --output "dist/FluentPLC-Simulator-0.1.0-macOS-arm64/FluentPLC Simulator.app"`。
+
+### 语言、主题与仓库信息
+
+Release 构建中的 UI 与 i18n 两组测试已通过，覆盖默认 Auto、系统语言解析、手动切换与保存、运行中保持 S7 连接和值、编辑输入保持、仓库卡翻译和最小窗口滚动。源文使用英文；中文词典逐项检查覆盖率和占位符，允许英文标点及单位符号。已生成并检查中英、明暗监视页与设置页截图。

@@ -44,7 +44,7 @@ def main():
         run(deploy, app, "-always-overwrite", "-verbose=1", f"-libpath={build / 'lib'}", f"-executable={server}")
         resources = contents / "Resources"
         resources.mkdir(exist_ok=True)
-        for name in ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
+        for name in ("README.md", "README_zh.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
             shutil.copy2(root / name, resources / name)
         for name in ("licenses", "examples", "docs"):
             shutil.copytree(root / name, resources / name, dirs_exist_ok=True)
@@ -64,6 +64,8 @@ def main():
         with plist_file.open("rb") as file:
             info = plistlib.load(file)
         info["CFBundleDisplayName"] = "FluentPLC Simulator"
+        info["CFBundleDevelopmentRegion"] = "en"
+        info["CFBundleLocalizations"] = ["en", "zh-Hans"]
         info["NSHighResolutionCapable"] = True
         with plist_file.open("wb") as file:
             plistlib.dump(info, file)

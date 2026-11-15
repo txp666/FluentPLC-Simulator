@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>FluentPLC Simulator</title>
+  <desc>A PLC module and waveform in the FluentHMI blue icon family.</desc>
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#05b7ed"/><stop offset=".48" stop-color="#0087ca"/><stop offset="1" stop-color="#034c86"/></linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#e9f3fa"/></linearGradient>
+  </defs>
+  <rect x="14" y="19" width="484" height="484" rx="96" fill="#143f5b" opacity=".18"/>
+  <rect x="14" y="10" width="484" height="484" rx="96" fill="url(#blue)" stroke="#82d6f7" stroke-width="2"/>
+  <rect x="96" y="101" width="320" height="264" rx="30" fill="#00324f" opacity=".20"/>
+  <rect x="96" y="89" width="320" height="264" rx="30" fill="url(#panel)"/>
+  <rect x="114" y="111" width="284" height="50" rx="12" fill="#deedf7" stroke="#bfd2e0" stroke-width="2"/>
+  <circle cx="137" cy="136" r="8" fill="#20c792"/>
+  <circle cx="162" cy="136" r="8" fill="#79b0cb"/>
+  <path d="M309 136h65" stroke="#8ba9be" stroke-width="8" stroke-linecap="round"/>
+  <rect x="116" y="179" width="158" height="104" rx="12" fill="#e3f5ff" stroke="#bdd7e9" stroke-width="2"/>
+  <path d="M132 233h25l12-24 19 48 20-48 13 24h36" fill="none" stroke="#057ebc" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="291" y="179" width="105" height="104" rx="12" fill="#e1eaf1"/>
+  <g fill="#7f9bb1"><circle cx="314" cy="202" r="6"/><circle cx="314" cy="231" r="6"/><circle cx="314" cy="260" r="6"/></g>
+  <path d="M337 202h35m-35 29h35m-35 29h35" stroke="#afc3d2" stroke-width="7" stroke-linecap="round"/>
+  <rect x="117" y="304" width="279" height="29" rx="7" fill="#c4d8e7"/>
+  <path d="M143 308v20m32-20v20m32-20v20m32-20v20m32-20v20m32-20v20m32-20v20m32-20v20" stroke="#f8fcff" stroke-width="5"/>
+  <path d="M206 420h20l13-25 22 50 22-50 13 25h14" fill="none" stroke="#003c63" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" opacity=".25"/>
+  <path d="M206 414h20l13-25 22 50 22-50 13 25h14" fill="none" stroke="#f5fcff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="204" cy="414" r="8" fill="#f5fcff"/><circle cx="312" cy="414" r="8" fill="#f5fcff"/>
+</svg>

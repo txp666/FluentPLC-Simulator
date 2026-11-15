@@ -1,91 +1,126 @@
-# FluentPLC Simulator
+<p align="center">
+  <img src="resources/logo.svg" width="110" alt="FluentPLC Simulator">
+  <h1 align="center">FluentPLC Simulator</h1>
+  <p align="center">A C++ S7 communication simulator for hardware engineers · built on <a href="https://github.com/txp666/FluentQtWidgets">FluentQtWidgets</a> and <a href="https://github.com/davenardella/snap7">Snap7</a></p>
+  <p align="center">English · <a href="README_zh.md">简体中文</a> · <a href="examples/hmi-demo.plcsim.json">Example project</a> · <a href="docs/project-format.md">Project format</a> · <a href="docs/testing.md">Validation</a></p>
+</p>
 
-![FluentPLC Simulator](docs/images/main-window.png)
+FluentPLC Simulator is the independent S7 communication testing tool in the [modusignal](https://github.com/txp666/modusignal) tool family. Edit variables, current values and lightweight signal rules in a desktop UI, or run the same simulation core from the CLI. External S7 clients read and write DB, M, I and Q memory through a real Snap7 server.
 
-用于 HMI 联调的 C++ / Qt S7 通信模拟器。桌面程序提供变量与规则的操作界面，命令行程序运行同一套模拟内核；外部 S7 客户端通过真实 Snap7 服务读取、写入内存。
+It simulates classic S7comm communication; it does not execute STEP 7 / TIA Portal projects or ladder logic and is not Siemens PLCSIM. It uses its own `.plcsim.json` projects. The three HMI tools in this family do not currently implement S7 clients.
 
-这是通信模拟与轻量信号规则工具，不执行 STEP 7 / TIA Portal 工程或梯形图，不等同于西门子 PLCSIM。支持范围以本仓库实现和测试为准。
+> **Settings**: Language offers Follow system (default), English and 简体中文. Theme offers Follow system (default), Light and Dark.
 
-## 快速开始
+These preferences are saved on this computer and apply immediately while preserving the running session and its values.
 
-构建依赖：Qt **6.12**（Core、Gui、Widgets、Svg、Network、Test）、CMake 3.21+、Ninja 和支持 C++17 的编译器。Snap7 与 FluentQtWidgets 以 Git 子模块固定源码版本，不需要另装系统 Snap7。
+## Screenshots
 
-Snap7 固定于官方源码 commit `30f37da3114024a71ba93f7fd855c680b97a406f`。macOS 构建在构建目录的副本应用 [兼容补丁](patches/snap7-macos.patch)，修正单调时钟和断连时 SIGPIPE 处理；不会直接修改子模块。来源与许可证见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+Monitor variables, edit live values, configure signal rules and control the server from one desktop app:
 
-在仓库根目录执行：
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/main-window-dark.png"><img src="docs/images/main-window.png" alt="FluentPLC Simulator variable monitor"></picture>
 
-```sh
+The Settings page includes appearance, language, repository information and related tools:
+
+![Settings](docs/images/settings.png)
+
+## Features
+
+- **Real S7 server**: classic S7comm / ISO-on-TCP with a configurable address and port; the desktop app and headless executable share one core.
+- **Typed memory**: BOOL, BYTE, SINT, WORD, INT, DWORD, DINT and REAL, encoded in Siemens big-endian order; BOOL bit writes preserve neighbouring bits.
+- **Lightweight rules**: manual, sine, ramp, toggle and follow, with ordered feedback evaluation and validation of addresses, types, overlaps and dependency cycles.
+- **Separate projects and live values**: save configuration and initial values, edit current memory, preserve memory across stop/start, and restore initial values when applying a project.
+
+## Building
+
+Requires CMake 3.21+, C++17, Ninja and **Qt 6.12** (Core, Gui, Widgets, Svg, Network and Test). Snap7 and FluentQtWidgets are pinned Git submodules; no system Snap7 installation is required. In the repository root:
+
+```bash
 git submodule update --init --recursive
-cmake --preset debug -DCMAKE_PREFIX_PATH=/你的/Qt/6.12.0/对应平台目录
+cmake --preset debug
 cmake --build --preset debug
 ctest --preset debug
 ```
 
-macOS 的 Qt 目录通常以 `macos` 结尾；Windows 在对应 Qt 编译器环境中运行，选择匹配的 `msvc*_64` 目录。Release 构建使用 `cmake --preset release` 和 `cmake --build --preset release`。具体构建和打包验证记录见 [测试说明](docs/testing.md)。
+Qt is discovered in the usual installer locations. For another location, add `-DCMAKE_PREFIX_PATH=<qt-dir>` to the configure command. On Windows, use the matching Qt/MSVC developer environment. For a Release build, use the `release` configure and build presets. See [Validation](docs/testing.md) for the platforms and artifacts actually checked.
 
-启动桌面目标 `FluentPLCSimulator`，打开 [HMI 联调示例](examples/hmi-demo.plcsim.json)，再启动模拟服务。也可以从构建目录运行命令行目标：
+Open `build/debug/FluentPLCSimulator.app` on macOS, or the `FluentPLCSimulator` executable on your platform. The service starts stopped. Open the [example project](examples/hmi-demo.plcsim.json), then start the server; the same project is also built into the app.
 
-```sh
+## Headless server
+
+```bash
 ./build/debug/FluentPLCServer \
   --project examples/hmi-demo.plcsim.json \
   --listen 127.0.0.1 --port 1102 --duration 30
 ```
 
-省略 `--duration` 会持续运行；省略 `--project` 使用程序内置示例。Windows 使用对应的 `.exe`。桌面目标在 macOS 上是 `.app` 包，可从 Finder 启动；命令行目标是独立可执行文件。
+Omit `--duration` to keep running, or omit `--project` to use the built-in example. On Windows, use the corresponding `.exe`. Validate a project without listening, or write out the built-in example:
 
-只校验工程不启动监听：
-
-```sh
+```bash
 ./build/debug/FluentPLCServer --project examples/hmi-demo.plcsim.json --check
 ./build/debug/FluentPLCServer --write-demo /tmp/builtin-demo.plcsim.json
 ```
 
-## HMI 连接参数
+## S7 client connection
 
-| 参数 | 本机示例值 |
-|---|---|
-| 协议 | 经典 S7comm / ISO-on-TCP |
-| PLC 地址 | `127.0.0.1` |
-| 端口 | `1102` |
-| Rack / Slot | `0` / `1` |
-| 数字字节序 | Siemens 大端 |
+| Setting | Local example |
+| --- | --- |
+| Protocol | Classic S7comm / ISO-on-TCP |
+| PLC address | `127.0.0.1` |
+| TCP port | `1102` |
+| Rack / slot | `0` / `1` |
+| Numeric byte order | Siemens big-endian |
 
-默认使用非特权端口 `1102`，不需要以管理员身份占用 PLC 常用的 `102`。HMI 客户端必须允许配置端口。在另一台电脑上连接时，服务绑定地址和 HMI 目标地址都应改成模拟器电脑可达的网卡 IP。
+The default unprivileged port `1102` avoids requiring administrator access to the usual PLC port `102`; your client must allow a configurable port. To connect from another computer, bind the service to a reachable interface and use that computer's IP address in the client.
 
-示例工程的变量如下。变量地址中的数字是**字节偏移**；例如 REAL 占四字节，因此 `DBD0` 与 `DBD4` 不重叠。
+The canonical example contains these variables. Address offsets are in **bytes**; REAL uses four bytes.
 
-| 地址 | 类型 | 用途 / 行为 |
-|---|---|---|
-| `DB1.DBX0.0` | BOOL | 运行状态，跟随启动请求 |
-| `DB1.DBX0.1` | BOOL | 启动请求，初始 false，保留 HMI 或界面写入的值 |
-| `DB1.DBD4` | REAL | 温度，初始 50；20–80 的正弦信号，周期 10 秒 |
-| `DB1.DBD8` | REAL | 压力，初始 0；0–10 的斜坡信号，周期 10 秒 |
-| `DB1.DBW12` | INT | 速度设定值，初始 1200；保留 HMI 或界面写入的值 |
-| `M0.0` | BOOL | 心跳，初始 false，每秒翻转 |
-| `Q0.0` | BOOL | 跟随启动请求的输出状态 |
+| Address | Type | Behaviour |
+| --- | --- | --- |
+| `DB1.DBX0.0` | BOOL | Running status; follows the start request |
+| `DB1.DBX0.1` | BOOL | Start request; initially false, preserves client or UI writes |
+| `DB1.DBD4` | REAL | Temperature; initially 50, sine wave from 20 to 80 with a 10-second period |
+| `DB1.DBD8` | REAL | Pressure; initially 0, ramp from 0 to 10 with a 10-second period |
+| `DB1.DBW12` | INT | Speed setpoint; initially 1200, preserves client or UI writes |
+| `M0.0` | BOOL | Heartbeat; initially false, flips every second |
+| `Q0.0` | BOOL | Output status; follows the start request |
 
-把 HMI 仪表绑定 `DB1.DBD4 / REAL`，输入框写入 `DB1.DBW12 / INT`，开关写入 `DB1.DBX0.1 / BOOL`，指示灯读取 `DB1.DBX0.0 / BOOL`，即可检查采集、写回和反馈。程序内置示例与上面的示例文件一致。此表描述通用连接方式，并不代表现有 HMI 产品已经实现 S7 控件或工程导出。
+With an S7-capable client, bind a gauge to `DB1.DBD4 / REAL`, write an input to `DB1.DBW12 / INT`, write a switch to `DB1.DBX0.1 / BOOL`, and read its feedback from `DB1.DBX0.0 / BOOL`. This is a generic S7 test setup; it does not add S7 support to the HMI designers linked below.
 
-## 模拟规则与保存
+## Rules and project files
 
-`manual` 保留内存当前值；采集 tick 不会把它恢复成初始值。`sine` 和 `ramp` 按时间生成数值；`toggle` 每半周期翻转 BOOL；`follow` 从另一个相同类型的已定义地址复制值。生成或跟随规则会在后续 tick 更新其目标，所以需要持久手动写入的目标应设为 `manual`。
+`manual` leaves current memory unchanged, so ticks do not restore its initial value. `sine` and `ramp` generate numeric signals, `toggle` flips a BOOL every half-period, and `follow` copies a named address of the same type. Generated and following tags are updated on later ticks; use `manual` for values that should retain client writes.
 
-停止与重新启动服务保留当前内存。加载/应用工程会按 `initialValue` 重新初始化；运行中不能替换工程。工程保存的是配置与初始值，不是 PLC 运行快照。
+Stopping and restarting preserves current memory. Applying or loading a project initializes its memory from `initialValue`; a running server must be stopped before its project is replaced. Saving writes configuration and initial values, rather than a live memory snapshot.
 
-工程扩展名约定为 `.plcsim.json`；格式独立于 HMI 的 `.uidp`。DB、M、I、Q 各区域的内存来自工程的 `memorySize`，只有工程中出现的 DB 会注册。变量表是这些区域中命名的视图，外部客户端仍能访问已注册区域内没有命名的字节。地址越界、变量重叠、未知类型、无效规则、缺失跟随来源和跟随循环会被拒绝。详见 [工程格式](docs/project-format.md)。
+Projects use `.plcsim.json`, separate from HMI `.uidp` files. `memorySize` sets the size of each registered area/DB; only DBs used in the project are registered. Named tags are views into those areas, and clients can access unnamed bytes inside registered areas too. Invalid addresses, out-of-range values, overlaps, unknown types or rules, missing follow sources and dependency cycles are rejected. See the [project format](docs/project-format.md).
 
-## 验证范围与许可证
+## Related projects
 
-自动化测试使用真实 `TS7Client` 连接本机随机高端口，覆盖网络读写、BOOL 位写保留邻位、规则反馈、工程校验和生命周期。两端都使用 Snap7，因此还应使用独立实现的客户端进行交叉验证，例如纯 Python 的 `python-snap7` 3.x；其具体 API 和位写行为需按固定版本确认。测试不需要真实 PLC。
+| Project | Role |
+| --- | --- |
+| [FluentHMI Studio](https://github.com/txp666/FluentHMI-Studio) | Native C++/Qt 6 HMI designer with standalone runtime export |
+| [PyQt UI Designer](https://github.com/txp666/PyQt-UI-Designer) | Python/PyQt5 HMI designer with editable Python source export and Nuitka packaging |
+| [modusignal](https://github.com/txp666/modusignal) | Browser device debugger and `.uidp` Custom Device editor, within browser transport limits |
+| [FluentPLC Simulator](https://github.com/txp666/FluentPLC-Simulator) | Independent desktop and CLI classic S7comm server for testing S7 clients |
 
-应用代码采用 GPL-3.0；原生 Snap7 采用 LGPL-3.0-or-later，保留其独立许可证及固定子模块来源。分发时应连同本项目许可证、Snap7 许可证和相应源码信息一起提供。当前平台的实际构建、桌面启动及跨实现客户端验证状态在 [测试说明](docs/testing.md) 中单独记录；没有记录的项目不能视为已经验证。
+The HMI tools share `.uidp` projects where their widgets and transports are supported. FluentPLC Simulator uses its own `.plcsim.json` format. S7 client support is not currently implemented in FluentHMI Studio, PyQt UI Designer or modusignal.
 
-## macOS 应用打包
+## Validation
 
-完成 Release 构建后运行：
+Tests use a real `TS7Client` over loopback TCP for typed reads/writes, BOOL neighbour preservation, rules, validation and lifecycle behaviour. An independent pure-Python `python-snap7` 3.5.0 client has also been checked against the CLI server. No physical PLC is needed. Native desktop checks, packaging results and platform limits are recorded separately in [Validation](docs/testing.md).
+
+## macOS packaging
+
+After building, run the packaging script with the chosen build directory:
 
 ```bash
 python3 scripts/package_macos.py --build-dir build/release
 ```
 
-生成 `dist/FluentPLC Simulator.app`，包含 Qt、Snap7、无界面服务程序、示例和许可证。打包脚本不会覆盖已有应用，可用 `--output` 选择新路径。
+It produces `dist/FluentPLC Simulator.app` with Qt, Snap7, the headless server, examples and licenses. Existing app bundles are not overwritten; choose another path with `--output` when needed.
+
+## Dependencies and license
+
+Snap7 is pinned to official commit `30f37da3114024a71ba93f7fd855c680b97a406f`. On macOS, the build applies a [compatibility patch](patches/snap7-macos.patch) to a build-tree copy for monotonic clocks and SIGPIPE handling; the submodule is left unchanged. See [Third-party notices](THIRD_PARTY_NOTICES.md) for component sources and licenses.
+
+Application code is GPL-3.0. Snap7 is LGPL-3.0-or-later and retains its own license and source attribution. Distributions include the project and dependency license texts and corresponding source information.

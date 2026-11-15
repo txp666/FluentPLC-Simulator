@@ -1,4 +1,5 @@
 #include "core/address.h"
+#include "core/i18n.h"
 
 #include <QtCore/QRegularExpression>
 
@@ -65,19 +66,19 @@ bool parseAddress(const QString &text, Address *address, QString *error)
         out.byteCount = width(match.captured(2).at(0));
         offset = match.captured(3);
     } else {
-        return fail(error, QStringLiteral("无效 S7 地址：%1（示例 DB1.DBX0.0、DB1.DBD4、M0.0、QW2）").arg(text));
+        return fail(error, I18n::tr("Invalid S7 address: %1 (examples: DB1.DBX0.0, DB1.DBD4, M0.0, QW2)").arg(text));
     }
     bool ok = false;
     const qulonglong byte = offset.toULongLong(&ok);
     // S7ANY carries a 24-bit bit address. The registered memory size is checked
     // separately by Project, so this parser is also usable for client fixtures.
     if (!ok || byte > 2097151ULL || byte + qulonglong(out.byteCount) > 2097152ULL)
-        return fail(error, QStringLiteral("S7 字节偏移超出范围：%1").arg(text));
+        return fail(error, I18n::tr("S7 byte offset is out of range: %1").arg(text));
     out.byteOffset = int(byte);
     if (out.area == MemoryArea::DataBlock) {
         const qulonglong number = dbNumber.toULongLong(&ok);
         if (!ok || number < 1 || number > 65535)
-            return fail(error, QStringLiteral("DB 编号必须为 1–65535：%1").arg(text));
+            return fail(error, I18n::tr("DB number must be between 1 and 65535: %1").arg(text));
         out.dbNumber = int(number);
     }
     const QString prefix = out.area == MemoryArea::DataBlock

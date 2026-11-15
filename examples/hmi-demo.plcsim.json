@@ -1,6 +1,6 @@
 {
     "format": "FluentPLC-Simulator",
-    "name": "S7 测试台",
+    "name": "S7 Test Bench",
     "server": {
         "bindAddress": "127.0.0.1",
         "memorySize": 512,
@@ -14,7 +14,7 @@
             "maximum": 1,
             "minimum": 0,
             "mode": "follow",
-            "name": "运行状态",
+            "name": "Running",
             "periodSeconds": 10,
             "source": "DB1.DBX0.1"
         },
@@ -25,7 +25,7 @@
             "maximum": 100,
             "minimum": 0,
             "mode": "manual",
-            "name": "启动请求",
+            "name": "Start request",
             "periodSeconds": 10,
             "source": ""
         },
@@ -36,7 +36,7 @@
             "maximum": 80,
             "minimum": 20,
             "mode": "sine",
-            "name": "温度",
+            "name": "Temperature",
             "periodSeconds": 10,
             "source": ""
         },
@@ -47,7 +47,7 @@
             "maximum": 10,
             "minimum": 0,
             "mode": "ramp",
-            "name": "压力",
+            "name": "Pressure",
             "periodSeconds": 10,
             "source": ""
         },
@@ -58,7 +58,7 @@
             "maximum": 100,
             "minimum": 0,
             "mode": "manual",
-            "name": "速度",
+            "name": "Speed",
             "periodSeconds": 10,
             "source": ""
         },
@@ -69,7 +69,7 @@
             "maximum": 1,
             "minimum": 0,
             "mode": "toggle",
-            "name": "心跳",
+            "name": "Heartbeat",
             "periodSeconds": 2,
             "source": ""
         },
@@ -80,7 +80,7 @@
             "maximum": 1,
             "minimum": 0,
             "mode": "follow",
-            "name": "输出状态",
+            "name": "Output",
             "periodSeconds": 10,
             "source": "DB1.DBX0.1"
         }

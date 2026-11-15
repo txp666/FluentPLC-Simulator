@@ -1,4 +1,5 @@
 #include "plc/plc_server.h"
+#include "core/i18n.h"
 
 #include "core/project_plan.h"
 #include "snap7.h"
@@ -28,6 +29,33 @@ bool fail(QString *error, const QString &message)
 {
     if (error) *error = message;
     return false;
+}
+
+QString eventText(const TSrvEvent &event)
+{
+    const auto *octets = reinterpret_cast<const unsigned char *>(&event.EvtSender);
+    const QString peer = QStringLiteral("%1.%2.%3.%4").arg(octets[0]).arg(octets[1]).arg(octets[2]).arg(octets[3]);
+    switch (event.EvtCode) {
+    case evcServerStarted: return I18n::tr("S7 server started on TCP port %1").arg(event.EvtParam1);
+    case evcServerStopped: return I18n::tr("S7 server stopped");
+    case evcListenerCannotStart: return I18n::tr("S7 listener could not start (error %1)").arg(event.EvtRetCode);
+    case evcClientAdded: return I18n::tr("Client %1 connected").arg(peer);
+    case evcClientRejected: return I18n::tr("Client %1 was rejected").arg(peer);
+    case evcClientNoRoom: return I18n::tr("Client %1 was rejected: client limit reached").arg(peer);
+    case evcClientException: return I18n::tr("Client %1 reported an exception (code %2)").arg(peer).arg(event.EvtRetCode);
+    case evcClientDisconnected: return I18n::tr("Client %1 disconnected").arg(peer);
+    case evcClientTerminated: return I18n::tr("Client %1 connection was closed").arg(peer);
+    case evcClientsDropped: return I18n::tr("Closed %1 client connections").arg(event.EvtParam1);
+    case evcNegotiatePDU: return I18n::tr("Client %1 negotiated a %2-byte PDU").arg(peer).arg(event.EvtParam1);
+    case evcDataRead:
+        return I18n::tr("S7 read failed: area %1, DB %2, start %3, size %4 (code %5)")
+            .arg(event.EvtParam1).arg(event.EvtParam2).arg(event.EvtParam3).arg(event.EvtParam4).arg(event.EvtRetCode);
+    case evcDataWrite:
+        return I18n::tr("S7 write failed: area %1, DB %2, start %3, size %4 (code %5)")
+            .arg(event.EvtParam1).arg(event.EvtParam2).arg(event.EvtParam3).arg(event.EvtParam4).arg(event.EvtRetCode);
+    default:
+        return I18n::tr("S7 event %1 from %2 (code %3)").arg(event.EvtCode).arg(peer).arg(event.EvtRetCode);
+    }
 }
 
 struct AreaBuffer {
@@ -162,11 +190,9 @@ struct PlcServer::Impl {
             if (Srv_PickEvent(native, &event, &ready) != 0 || !ready) break;
             if (event.EvtCode == evcDataRead && event.EvtRetCode == 0) { ++reads; continue; }
             if (event.EvtCode == evcDataWrite && event.EvtRetCode == 0) { ++writes; continue; }
-            char text[512] = {};
-            if (Srv_EventText(&event, text, int(sizeof text)) == 0)
-                lines.append(QString::fromLocal8Bit(text));
+            lines.append(eventText(event));
         }
-        if (reads || writes) lines.append(QStringLiteral("S7 数据交换：读取 %1 次，写入 %2 次").arg(reads).arg(writes));
+        if (reads || writes) lines.append(I18n::tr("S7 data exchange: %1 reads, %2 writes").arg(reads).arg(writes));
         return lines;
     }
 };
@@ -205,7 +231,7 @@ PlcServer::~PlcServer()
 bool PlcServer::setProject(const Project &project, QString *error)
 {
     Q_ASSERT(QThread::currentThread() == thread());
-    if (d->running) return fail(error, QStringLiteral("请先停止模拟 PLC 再修改工程"));
+    if (d->running) return fail(error, I18n::tr("Stop the simulated PLC before changing the project"));
     ProjectPlan plan;
     if (!prepareProject(project, &plan, error)) return false;
     AreaBuffers areas;
@@ -230,7 +256,7 @@ bool PlcServer::setProject(const Project &project, QString *error)
             tagAreas.append(area);
         }
     } catch (const std::bad_alloc &) {
-        return fail(error, QStringLiteral("无法分配工程内存"));
+        return fail(error, I18n::tr("Cannot allocate project memory"));
     }
     // Prepare everything first: a bad project never replaces the current one.
     d->shutdown();
@@ -260,23 +286,23 @@ bool PlcServer::start(QString *error)
     if (!d->project.validate(error)) return false;
     d->shutdown();
     try { d->native = Srv_Create(); }
-    catch (const std::bad_alloc &) { return fail(error, QStringLiteral("无法创建 Snap7 服务器")); }
-    if (!d->native) return fail(error, QStringLiteral("无法创建 Snap7 服务器"));
+    catch (const std::bad_alloc &) { return fail(error, I18n::tr("Cannot create the Snap7 server")); }
+    if (!d->native) return fail(error, I18n::tr("Cannot create the Snap7 server"));
     const auto failed = [&](int code, const QString &action) {
-        const QString message = action + QStringLiteral("：") + serverError(code);
+        const QString message = I18n::tr("%1: %2").arg(action, serverError(code));
         d->shutdown();
         emit logMessage(message);
         return fail(error, message);
     };
     word port = d->project.port;
     int code = Srv_SetParam(d->native, p_u16_LocalPort, &port);
-    if (code) return failed(code, QStringLiteral("设置监听端口失败"));
+    if (code) return failed(code, I18n::tr("Cannot set the listening port"));
     int maxClients = 16;
     code = Srv_SetParam(d->native, p_i32_MaxClients, &maxClients);
-    if (code) return failed(code, QStringLiteral("设置客户端上限失败"));
+    if (code) return failed(code, I18n::tr("Cannot set the client limit"));
     int workInterval = 25;
     code = Srv_SetParam(d->native, p_i32_WorkInterval, &workInterval);
-    if (code) return failed(code, QStringLiteral("设置工作间隔失败"));
+    if (code) return failed(code, I18n::tr("Cannot set the worker interval"));
     const longword mask = evcServerStarted | evcServerStopped | evcListenerCannotStart | evcClientAdded
                           | evcClientRejected | evcClientNoRoom | evcClientException | evcClientDisconnected
                           | evcClientTerminated | evcClientsDropped | evcDataRead | evcDataWrite | evcNegotiatePDU;
@@ -285,10 +311,10 @@ bool PlcServer::start(QString *error)
     for (const auto &entry : d->areas) {
         AreaBuffer &area = *entry.second;
         code = Srv_RegisterArea(d->native, area.nativeArea, area.dbNumber, area.bytes.data(), int(area.bytes.size()));
-        if (code) return failed(code, QStringLiteral("注册 %1 内存失败").arg(entry.first));
+        if (code) return failed(code, I18n::tr("Cannot register %1 memory").arg(entry.first));
     }
     code = Srv_StartTo(d->native, d->project.bindAddress.toLatin1().constData());
-    if (code) return failed(code, QStringLiteral("无法监听 %1:%2").arg(d->project.bindAddress).arg(d->project.port));
+    if (code) return failed(code, I18n::tr("Cannot listen on %1:%2").arg(d->project.bindAddress).arg(d->project.port));
     d->running = true;
     d->clients = 0;
     d->timer->start();
@@ -306,7 +332,7 @@ void PlcServer::stop()
     d->shutdown();
     QPointer<PlcServer> alive(this);
     if (clients) { emit clientsChanged(0); if (!alive) return; }
-    if (wasRunning) { emit stateChanged(false); if (!alive) return; emit logMessage(QStringLiteral("模拟 PLC 已停止，内存值已保留")); }
+    if (wasRunning) { emit stateChanged(false); if (!alive) return; emit logMessage(I18n::tr("Simulated PLC stopped; memory values were retained")); }
 }
 
 bool PlcServer::isRunning() const { return d->running; }
@@ -326,14 +352,14 @@ QVariant PlcServer::value(int tagIndex) const
 bool PlcServer::setValue(int tagIndex, const QVariant &value, QString *error)
 {
     Q_ASSERT(QThread::currentThread() == thread());
-    if (tagIndex < 0 || tagIndex >= d->plan.tags.size()) return fail(error, QStringLiteral("标签索引无效"));
+    if (tagIndex < 0 || tagIndex >= d->plan.tags.size()) return fail(error, I18n::tr("Invalid tag index"));
     const PreparedTag &tag = d->plan.tags.at(tagIndex);
     QByteArray encoded;
     if (!encodeValue(value, tag.type, &encoded, error)) return false;
     bool changed = false;
     {
         AreaLocks locks(d->native, d->areas);
-        if (!locks.ok()) return fail(error, QStringLiteral("无法锁定 PLC 内存"));
+        if (!locks.ok()) return fail(error, I18n::tr("Cannot lock PLC memory"));
         AreaBuffer &area = *d->tagAreas.at(tagIndex);
         writeBytes(area, tag, encoded);
         QList<QByteArray> current = d->snapshotUnlocked();
