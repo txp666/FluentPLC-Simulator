@@ -109,9 +109,25 @@ The HMI tools share `.uidp` projects where their widgets and transports are supp
 
 Tests use a real `TS7Client` over loopback TCP for typed reads/writes, BOOL neighbour preservation, rules, validation and lifecycle behaviour. An independent pure-Python `python-snap7` 3.5.0 client has also been checked against the CLI server. No physical PLC is needed. Native desktop checks, packaging results and platform limits are recorded separately in [Validation](docs/testing.md).
 
-## macOS packaging
+## Application updates
 
-After building, run the packaging script with the chosen build directory:
+Settings includes **Check for updates** and **Check at startup** (enabled by default). Like FluentHMI Studio, the simulator reads the latest stable GitHub Release, downloads the package for this platform and verifies its SHA-256 before preparing it. Choose **Restart and update**, or **Later** to install when the simulator exits. Unsaved project changes are handled before exit; project files and language/theme preferences are kept. A failed replacement restores the old application.
+
+Automatic installation is available in packaged apps: macOS universal ZIP, Windows x64 ZIP, and Linux x64 DEB (Ubuntu 24.04+ / Debian 13). Linux uses `pkexec` and `apt-get`. A build-tree executable or a release without the matching package and `.sha256` opens the release page for manual installation. Version 0.1.0 needs one manual installation of an OTA-enabled build.
+
+`FluentPLCSimulator --update` runs the same update flow without a window. `FPLC_UPDATE_URL` can point to a local release API for development.
+
+## Packaging
+
+Build platform packages and SHA-256 sidecars with:
+
+```bash
+python3 scripts/package.py --build-dir build/release --output-dir dist
+```
+
+Push a `vX.Y.Z` tag matching the CMake version to build and publish all platform packages after CI passes. Prerelease tags produce prereleases, which the stable updater does not offer. CI on pull requests builds packages without publishing them.
+
+For a local macOS app bundle:
 
 ```bash
 python3 scripts/package_macos.py --build-dir build/release

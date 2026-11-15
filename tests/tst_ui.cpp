@@ -1,10 +1,12 @@
 #include "app/main_window.h"
 #include "core/i18n.h"
 #include "plc/plc_server.h"
+#include "update/update_controller.h"
 
 #include <FluentQtWidgets/Theme.h>
 #include <FluentQtWidgets/ThemeListener.h>
 #include <FluentQtWidgets/Widgets/ComboBox.h>
+#include <FluentQtWidgets/Widgets/SwitchButton.h>
 
 #include <snap7.h>
 #include <QtCore/QFile>
@@ -84,6 +86,7 @@ private slots:
     void themeSelectionIsImmediateAndPersistent();
     void openVariableDialogKeepsInputWhenLanguageChanges();
     void repositoryCardIsTranslatedAndReachable();
+    void updateSettingsPersistAndTranslate();
 };
 
 void UiTest::defaultWindowDoesNotListen()
@@ -465,6 +468,32 @@ void UiTest::repositoryCardIsTranslatedAndReachable()
     QVERIFY(fplc::I18n::setLanguage(QStringLiteral("Auto"), false));
 }
 
+void UiTest::updateSettingsPersistAndTranslate()
+{
+    QSettings().remove(QStringLiteral("update/checkAtStartup"));
+    QVERIFY(fplc::UpdateController::checkAtStartup());
+    fplc::UpdateController::setCheckAtStartup(false);
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("en_US"), false));
+    fplc::MainWindow window;
+    auto *startup = window.findChild<FluentQt::SwitchButton *>(QStringLiteral("checkAtStartupSwitch"));
+    auto *check = window.findChild<QPushButton *>(QStringLiteral("checkUpdateButton"));
+    QVERIFY(startup && check);
+    QCOMPARE(check->text(), QStringLiteral("Check for updates"));
+    QVERIFY(!startup->isChecked());
+    startup->setChecked(true);
+    QVERIFY(fplc::UpdateController::checkAtStartup());
+    startup->setChecked(false);
+    QVERIFY(!fplc::UpdateController::checkAtStartup());
+    fplc::MainWindow restored;
+    auto *restoredStartup = restored.findChild<FluentQt::SwitchButton *>(QStringLiteral("checkAtStartupSwitch"));
+    QVERIFY(restoredStartup && !restoredStartup->isChecked());
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("zh_CN"), false));
+    QTRY_COMPARE(check->text(), QStringLiteral("检查更新"));
+    QVERIFY(!window.isWindowModified());
+    QVERIFY(!window.server()->isRunning());
+    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("Auto"), false));
+}
+
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
@@ -476,6 +505,7 @@ int main(int argc, char **argv)
     if (!settings.isValid()) return 1;
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    QSettings().setValue(QStringLiteral("update/checkAtStartup"), false);
     fplc::I18n::initialize(&app);
     UiTest test;
     return QTest::qExec(&test, argc, argv);

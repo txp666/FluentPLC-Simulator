@@ -111,9 +111,25 @@ macOS 的 Qt 目录通常以 `macos` 结尾；Windows 在对应 Qt 编译器环�
 
 应用代码采用 GPL-3.0；原生 Snap7 采用 LGPL-3.0-or-later，保留其独立许可证及固定子模块来源。分发时应连同本项目许可证、Snap7 许可证和相应源码信息一起提供。当前平台的实际构建、桌面启动及跨实现客户端验证状态在 [测试说明](docs/testing.md) 中单独记录；没有记录的项目不能视为已经验证。
 
-## macOS 应用打包
+## 应用更新
 
-完成 Release 构建后运行：
+设置页提供“检查更新”和“启动时检查更新”（默认开启）。更新流程参考 FluentHMI Studio：读取 GitHub 最新稳定 Release，下载本平台安装包并验证 SHA-256，然后选择“重启并更新”，或“稍后”在退出时安装。退出前会先处理未保存的工程；工程文件和语言、主题设置会保留。替换失败时恢复旧版应用。
+
+自动安装适用于打包版本：macOS 通用 ZIP、Windows x64 ZIP、Linux x64 DEB（Ubuntu 24.04+ / Debian 13）。Linux 通过 `pkexec` 和 `apt-get` 安装。从构建目录运行，或 Release 缺少对应安装包及 `.sha256` 时，会提供发布页供手动安装。0.1.0 版本需要先手动安装一次支持 OTA 的新版。
+
+`FluentPLCSimulator --update` 可在不打开窗口的情况下执行相同的更新流程。开发时可通过 `FPLC_UPDATE_URL` 指向本机的 Release API。
+
+## 打包
+
+生成当前平台安装包及 SHA-256 校验文件：
+
+```bash
+python3 scripts/package.py --build-dir build/release --output-dir dist
+```
+
+推送与 CMake 版本一致的 `vX.Y.Z` 标签后，CI 会在全部平台通过后发布安装包。预发布标签生成预发布版本，稳定版更新器不会推荐这些版本。PR 的 CI 只构建安装包，不发布 Release。
+
+仅生成本机 macOS 应用包：
 
 ```bash
 python3 scripts/package_macos.py --build-dir build/release

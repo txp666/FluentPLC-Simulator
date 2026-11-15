@@ -23,6 +23,7 @@ class TableWidget;
 namespace fplc {
 
 class PlcServer;
+class UpdateController;
 
 class MainWindow : public FluentQt::FluentWindow {
     Q_OBJECT
@@ -98,6 +99,9 @@ private:
     FluentQt::SpinBox *m_memorySpin = nullptr;
     FluentQt::ComboBox *m_themeCombo = nullptr;
     FluentQt::ComboBox *m_languageCombo = nullptr;
+    UpdateController *m_updates = nullptr;
+    FluentQt::PrimaryPushButton *m_checkUpdateButton = nullptr;
+    bool m_restartForUpdate = false;
     FluentQt::PlainTextEdit *m_logEdit = nullptr;
 };
 

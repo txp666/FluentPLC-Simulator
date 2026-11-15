@@ -1,6 +1,7 @@
 #include "app/main_window.h"
 #include "core/i18n.h"
 #include "plc/plc_server.h"
+#include "update/update_controller.h"
 
 #include <FluentQtWidgets/Dialogs/Dialog.h>
 #include <FluentQtWidgets/FluentIcon.h>
@@ -18,6 +19,7 @@
 #include <FluentQtWidgets/Widgets/LineEdit.h>
 #include <FluentQtWidgets/Widgets/ScrollArea.h>
 #include <FluentQtWidgets/Widgets/SpinBox.h>
+#include <FluentQtWidgets/Widgets/SwitchButton.h>
 
 #include <QtCore/QDateTime>
 #include <QtCore/QEvent>
@@ -300,7 +302,7 @@ public:
         bindTranslation(yesButton(), "text", QT_TR_NOOP("Save variable"));
         yesButton()->setObjectName(QStringLiteral("tagAcceptButton"));
         bindTranslation(cancelButton(), "text", QT_TR_NOOP("Cancel"));
-        cancelButton()->setObjectName(QStringLiteral("tagCancelButton"));
+        // Dialog's stylesheet addresses #cancelButton; keep its framework name.
         connect(m_mode, &ComboBox::currentIndexChanged, this, [this] { updateRuleFields(); });
         updateRuleFields();
     }
@@ -418,6 +420,7 @@ MainWindow::MainWindow(QWidget *parent)
     const QString theme = QSettings().value(QStringLiteral("ui/theme"), QStringLiteral("Auto")).toString();
     themes->setTheme(theme == QStringLiteral("Dark") ? Theme::Dark : theme == QStringLiteral("Light") ? Theme::Light : Theme::Auto);
     themes->applyTo(qApp);
+    m_updates = new UpdateController(this);
 
     m_monitorPage = createMonitorPage();
     addSubInterface(m_monitorPage, icon(FluentIcon::View), tr("Variable monitor"), QStringLiteral("monitorPage"));
@@ -425,6 +428,15 @@ MainWindow::MainWindow(QWidget *parent)
     addSubInterface(createLogsPage(), icon(FluentIcon::History), tr("Server log"), QStringLiteral("logsPage"));
     addSubInterface(createSettingsPage(), icon(FluentIcon::Setting), tr("Settings"), QStringLiteral("settingsPage"), NavigationItemPosition::Bottom);
     createShortcuts();
+    connect(m_updates, &UpdateController::checkingChanged, this, [this](bool checking) {
+        m_checkUpdateButton->setEnabled(!checking);
+        bindTranslation(m_checkUpdateButton, "text", checking ? QT_TR_NOOP("Checking…") : QT_TR_NOOP("Check for updates"));
+    });
+    connect(m_updates, &UpdateController::restartRequested, this, [this] {
+        m_restartForUpdate = true;
+        close();
+    });
+    QTimer::singleShot(1500, m_updates, &UpdateController::startupCheck);
 
     connect(m_server, &PlcServer::logMessage, this, &MainWindow::appendLog);
     connect(m_server, &PlcServer::stateChanged, this, [this](bool running) {
@@ -755,6 +767,27 @@ QWidget *MainWindow::createSettingsPage()
             m_languageCombo->setCurrentIndex(m_languageCombo->findData(I18n::setting()));
         }
     });
+    auto *updates = new CardWidget(page);
+    updates->setObjectName(QStringLiteral("updatesCard"));
+    auto *updatesLayout = cardLayout(updates);
+    updatesLayout->addWidget(translatedLabel<SubtitleLabel>(QT_TR_NOOP("Application updates"), updates));
+    updatesLayout->addWidget(description(QT_TR_NOOP("Download verified releases from GitHub. A prepared update is installed when the simulator exits. Project files and preferences are kept."), updates));
+    auto *checkRow = new QHBoxLayout;
+    checkRow->addWidget(translatedLabel<BodyLabel>(QT_TR_NOOP("Check at startup"), updates));
+    checkRow->addStretch();
+    auto *startup = new SwitchButton(updates);
+    startup->setObjectName(QStringLiteral("checkAtStartupSwitch"));
+    startup->setOnText(QString());
+    startup->setOffText(QString());
+    startup->setChecked(UpdateController::checkAtStartup());
+    connect(startup, &SwitchButton::checkedChanged, this, &UpdateController::setCheckAtStartup);
+    checkRow->addWidget(startup);
+    updatesLayout->addLayout(checkRow);
+    m_checkUpdateButton = translatedButton<PrimaryPushButton>(icon(FluentIcon::Update), QT_TR_NOOP("Check for updates"), updates);
+    m_checkUpdateButton->setObjectName(QStringLiteral("checkUpdateButton"));
+    connect(m_checkUpdateButton, &PushButton::clicked, m_updates, &UpdateController::checkNow);
+    updatesLayout->addWidget(m_checkUpdateButton, 0, Qt::AlignLeft);
+    layout->addWidget(updates);
     auto *repository = new CardWidget(page);
     repository->setObjectName(QStringLiteral("repositoryCard"));
     auto *repositoryLayout = cardLayout(repository);
@@ -1163,6 +1196,14 @@ void MainWindow::appendLog(const QString &message)
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     if (!confirmSaveChanges()) {
+        m_restartForUpdate = false;
+        event->ignore();
+        return;
+    }
+    QString error;
+    if (!m_updates->finishOnExit(m_restartForUpdate, &error) && m_restartForUpdate) {
+        m_restartForUpdate = false;
+        showError(tr("Could not start the update"), error);
         event->ignore();
         return;
     }

@@ -1,6 +1,7 @@
 #include "app/main_window.h"
 #include "core/i18n.h"
 #include "plc/plc_server.h"
+#include "update/update_controller.h"
 #include <FluentQtWidgets/Theme.h>
 #include <FluentQtWidgets/Widgets/ComboBox.h>
 #include <QtCore/QCommandLineParser>
@@ -32,6 +33,7 @@ int main(int argc, char **argv)
     parser.addOption({QStringLiteral("language"), QStringLiteral("Interface language: Auto, en_US or zh_CN"), QStringLiteral("locale")});
     parser.addOption({QStringLiteral("theme"), QStringLiteral("Override this session's theme: Auto, Light or Dark"), QStringLiteral("theme")});
     parser.addOption({QStringLiteral("page"), QStringLiteral("Initial page: monitor, rules, logs or settings"), QStringLiteral("page")});
+    parser.addOption({QStringLiteral("update"), QStringLiteral("Check, download and install the latest release without opening a window")});
     parser.process(app);
     if (parser.isSet(QStringLiteral("language"))) {
         const QString choice = parser.value(QStringLiteral("language"));
@@ -43,6 +45,7 @@ int main(int argc, char **argv)
     } else {
         fplc::I18n::initialize(&app);
     }
+    if (parser.isSet(QStringLiteral("update"))) return fplc::UpdateController::runHeadless();
     fplc::MainWindow window;
     if (parser.isSet(QStringLiteral("theme"))) {
         const QString theme = parser.value(QStringLiteral("theme"));
