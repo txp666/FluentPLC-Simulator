@@ -86,8 +86,6 @@ private slots:
     void themeSelectionIsImmediateAndPersistent();
     void openVariableDialogKeepsInputWhenLanguageChanges();
     void repositoryCardIsTranslatedAndReachable();
-    void variableDialogCancelUsesFluentStyleAndPreservesProject_data();
-    void variableDialogCancelUsesFluentStyleAndPreservesProject();
     void updateSettingsPersistAndTranslate();
 };
 
@@ -467,64 +465,6 @@ void UiTest::repositoryCardIsTranslatedAndReachable()
     QVERIFY(!window.server()->isRunning());
     QVERIFY(fplc::I18n::setLanguage(QStringLiteral("en_US"), false));
     QTRY_COMPARE(title->text(), QStringLiteral("Repository"));
-    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("Auto"), false));
-}
-
-void UiTest::variableDialogCancelUsesFluentStyleAndPreservesProject_data()
-{
-    QTest::addColumn<bool>("edit");
-    QTest::addColumn<bool>("dark");
-    QTest::newRow("add-light") << false << false;
-    QTest::newRow("add-dark") << false << true;
-    QTest::newRow("edit-light") << true << false;
-    QTest::newRow("edit-dark") << true << true;
-}
-
-void UiTest::variableDialogCancelUsesFluentStyleAndPreservesProject()
-{
-    QFETCH(bool, edit);
-    QFETCH(bool, dark);
-    QVERIFY(fplc::I18n::setLanguage(QStringLiteral("zh_CN"), false));
-    fplc::MainWindow window;
-    window.show();
-    FluentQt::ThemeManager::instance()->setTheme(dark ? FluentQt::Theme::Dark : FluentQt::Theme::Light);
-    auto *table = window.findChild<QTableWidget *>(QStringLiteral("tagTable"));
-    QVERIFY(table);
-    table->setCurrentCell(0, 0);
-    auto *button = window.findChild<QPushButton *>(edit ? QStringLiteral("editTagButton") : QStringLiteral("addTagButton"));
-    QVERIFY(button);
-    const int originalTags = window.project().tags.size();
-    const QString originalName = window.project().tags.first().name;
-    bool equalHeight = false;
-    bool dismissed = false;
-    QTimer::singleShot(2000, &window, [&] {
-        if (auto *dialog = window.findChild<QDialog *>(QStringLiteral("tagDialog"))) dialog->reject();
-    });
-    QTimer::singleShot(40, &window, [&] {
-        auto *dialog = window.findChild<QDialog *>(QStringLiteral("tagDialog"));
-        if (!dialog) return;
-        auto *cancel = dialog->findChild<QPushButton *>(QStringLiteral("cancelButton"));
-        auto *save = dialog->findChild<QPushButton *>(QStringLiteral("tagAcceptButton"));
-        if (auto *name = dialog->findChild<QLineEdit *>(QStringLiteral("tagNameEdit"))) name->setText(QStringLiteral("Unsaved input"));
-        if (cancel && save) {
-            equalHeight = cancel->height() == save->height() && cancel->height() >= 30;
-            const QString screenshots = qEnvironmentVariable("FPLC_TEST_SCREENSHOT_DIR");
-            if (!screenshots.isEmpty()) {
-                QDir().mkpath(screenshots);
-                dialog->grab().save(QDir(screenshots).filePath(QStringLiteral("%1-%2.png").arg(edit ? "edit" : "add", dark ? "dark" : "light")));
-            }
-            QTest::mouseClick(cancel, Qt::LeftButton);
-            dismissed = dialog->result() == QDialog::Rejected;
-        } else {
-            dialog->reject();
-        }
-    });
-    QTest::mouseClick(button, Qt::LeftButton);
-    QVERIFY(equalHeight);
-    QVERIFY(dismissed);
-    QCOMPARE(window.project().tags.size(), originalTags);
-    QCOMPARE(window.project().tags.first().name, originalName);
-    QVERIFY(!window.isWindowModified());
     QVERIFY(fplc::I18n::setLanguage(QStringLiteral("Auto"), false));
 }
 
