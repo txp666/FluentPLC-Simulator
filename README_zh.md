@@ -7,7 +7,7 @@
 
 FluentPLC Simulator 是 [modusignal](https://github.com/txp666/modusignal) 工具系列中的独立 S7 通信测试工具。桌面界面编辑变量、当前值和轻量信号规则，命令行程序运行同一模拟内核；外部 S7 客户端通过真实 Snap7 服务读写 DB、M、I、Q 内存。
 
-这是经典 S7comm 通信模拟器，不执行 STEP 7 / TIA Portal 工程或梯形图，也不等同于西门子 PLCSIM。它使用独立的 `.plcsim.json` 工程；系列中的三种 HMI 工具当前尚未实现 S7 客户端。
+这是经典 S7comm 通信模拟器，不执行 STEP 7 / TIA Portal 工程或梯形图，也不等同于西门子 PLCSIM。它使用独立的 `.plcsim.json` 工程；FluentHMI Studio 和 PyQt UI Designer 0.7.0 已在预览和导出应用中支持经典 S7 客户端，网页版 modusignal 编辑器暂不支持 S7。
 
 > **设置**：语言可选「跟随系统」（默认）、English 和简体中文；主题可选「跟随系统」（默认）、浅色和深色。
 
@@ -84,7 +84,7 @@ macOS 的 Qt 目录通常以 `macos` 结尾；Windows 在对应 Qt 编译器环�
 | `M0.0` | BOOL | 心跳，初始 false，每秒翻转 |
 | `Q0.0` | BOOL | 跟随启动请求的输出状态 |
 
-把 HMI 仪表绑定 `DB1.DBD4 / REAL`，输入框写入 `DB1.DBW12 / INT`，开关写入 `DB1.DBX0.1 / BOOL`，指示灯读取 `DB1.DBX0.0 / BOOL`，即可检查采集、写回和反馈。程序内置示例与上面的示例文件一致。此表描述通用连接方式，并不代表现有 HMI 产品已经实现 S7 控件或工程导出。
+在 FluentHMI Studio 或 PyQt UI Designer 0.7.0 中添加 S7 连接卡片，填写上表参数。仪表绑定 `DB1.DBD4 / REAL`，输入框写入 `DB1.DBW12 / INT`，开关写入 `DB1.DBX0.1 / BOOL`，指示灯读取 `DB1.DBX0.0 / BOOL`，即可检查采集、写回和反馈。程序内置示例与上面的示例文件一致。具体操作见 [C++ 版 S7 配置](https://github.com/txp666/FluentHMI-Studio/blob/v0.7.0/docs/s7.md)或 [Python 版 S7 配置](https://github.com/txp666/PyQt-UI-Designer/blob/v0.7.0/docs/s7.md)。
 
 ## 模拟规则与保存
 
@@ -103,7 +103,7 @@ macOS 的 Qt 目录通常以 `macos` 结尾；Windows 在对应 Qt 编译器环�
 | [modusignal](https://github.com/txp666/modusignal) | 浏览器设备调试台与 `.uidp` 自定义设备编辑器，通信受浏览器能力限制 |
 | [FluentPLC Simulator](https://github.com/txp666/FluentPLC-Simulator) | 独立桌面与命令行经典 S7comm 服务端，用于测试 S7 客户端 |
 
-三种 HMI 工具可在各自支持的控件与通信范围内交换 `.uidp` 工程。FluentPLC Simulator 使用独立的 `.plcsim.json` 格式；FluentHMI Studio、PyQt UI Designer 和 modusignal 当前均未实现 S7 客户端。
+三种 HMI 工具可在各自支持的控件与通信范围内交换 `.uidp` 工程。FluentPLC Simulator 使用独立的 `.plcsim.json` 格式；S7 工程需要支持 UIDP 1.1 的桌面 HMI 版本（FluentHMI Studio 和 PyQt UI Designer 0.7.0），网页版编辑器不支持这一 S7 后端。
 
 ## 验证范围与许可证
 
