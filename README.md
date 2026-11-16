@@ -7,7 +7,7 @@
 
 FluentPLC Simulator is the independent S7 communication testing tool in the [modusignal](https://github.com/txp666/modusignal) tool family. Edit variables, current values and lightweight signal rules in a desktop UI, or run the same simulation core from the CLI. External S7 clients read and write DB, M, I and Q memory through a real Snap7 server.
 
-It simulates classic S7comm communication; it does not execute STEP 7 / TIA Portal projects or ladder logic and is not Siemens PLCSIM. It uses its own `.plcsim.json` projects. The three HMI tools in this family do not currently implement S7 clients.
+It simulates classic S7comm communication; it does not execute STEP 7 / TIA Portal projects or ladder logic and is not Siemens PLCSIM. It uses its own `.plcsim.json` projects. FluentHMI Studio and PyQt UI Designer 0.7.0 support classic S7 clients in preview and exported applications; the browser-based modusignal editor does not support S7.
 
 > **Settings**: Language offers Follow system (default), English and 简体中文. Theme offers Follow system (default), Light and Dark.
 
@@ -84,7 +84,7 @@ The canonical example contains these variables. Address offsets are in **bytes**
 | `M0.0` | BOOL | Heartbeat; initially false, flips every second |
 | `Q0.0` | BOOL | Output status; follows the start request |
 
-With an S7-capable client, bind a gauge to `DB1.DBD4 / REAL`, write an input to `DB1.DBW12 / INT`, write a switch to `DB1.DBX0.1 / BOOL`, and read its feedback from `DB1.DBX0.0 / BOOL`. This is a generic S7 test setup; it does not add S7 support to the HMI designers linked below.
+In FluentHMI Studio or PyQt UI Designer 0.7.0, add an S7 connection card with the settings above. Bind a gauge to `DB1.DBD4 / REAL`, write an input to `DB1.DBW12 / INT`, write a switch to `DB1.DBX0.1 / BOOL`, and read its feedback from `DB1.DBX0.0 / BOOL`. See the [C++ S7 setup](https://github.com/txp666/FluentHMI-Studio/blob/v0.7.0/docs/s7.md) or [Python S7 setup](https://github.com/txp666/PyQt-UI-Designer/blob/v0.7.0/docs/s7.md).
 
 ## Rules and project files
 
@@ -103,7 +103,7 @@ Projects use `.plcsim.json`, separate from HMI `.uidp` files. `memorySize` sets 
 | [modusignal](https://github.com/txp666/modusignal) | Browser device debugger and `.uidp` Custom Device editor, within browser transport limits |
 | [FluentPLC Simulator](https://github.com/txp666/FluentPLC-Simulator) | Independent desktop and CLI classic S7comm server for testing S7 clients |
 
-The HMI tools share `.uidp` projects where their widgets and transports are supported. FluentPLC Simulator uses its own `.plcsim.json` format. S7 client support is not currently implemented in FluentHMI Studio, PyQt UI Designer or modusignal.
+The HMI tools share `.uidp` projects where their widgets and transports are supported. FluentPLC Simulator uses its own `.plcsim.json` format. S7 projects require the desktop HMI versions supporting UIDP 1.1 (FluentHMI Studio and PyQt UI Designer 0.7.0); the browser editor does not implement this S7 backend.
 
 ## Validation
 
